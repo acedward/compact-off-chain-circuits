@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: Apache-2.0
+// compact-off-chain-circuits — Interface template.
+//
+// Copy this file next to your contract, rename it <YourContract>.Interface.compact,
+// and fill in the two places marked TODO. It does NOT compile until you do: the
+// import below points at a module that does not exist.
+//
+// WHAT THIS FILE IS
+//
+// The "partial source": the only Compact source you publish. It contains the
+// circuits you want consumers to be able to run off chain, and nothing else. Its
+// compiled verifier keys are byte-identical to the ones your deployed contract
+// installed on chain, so a consumer can check what they ran against the chain.
+//
+// ---------------------------------------------------------------------------
+// INVARIANT 1 — LEDGER LAYOUT
+// ---------------------------------------------------------------------------
+// A verifier key is determined by ledger slot positions, slot types and circuit
+// logic. Every identifier — ledger field names, struct names, parameter names,
+// the circuit name itself — is erased by the compiler and does not affect the
+// key. Consequences:
+//
+//   * The reliable way to reproduce the layout is to import the SAME module your
+//     deployed contract imports, and declare no ledger here. Do that whenever the
+//     contract's state lives in a module (as it does for the OpenZeppelin
+//     integrations in this repository).
+//   * If your contract declares its ledger inline, repeat EVERY declaration here
+//     in the original order with the original types. You may rename them. You may
+//     append extra declarations AFTER all of them.
+//   * Inserting or reordering a declaration that precedes a slot a published
+//     circuit reads shifts that slot and changes the key. `deploy-check` compares
+//     against your full build and refuses to publish when that happens.
+//
+// ---------------------------------------------------------------------------
+// INVARIANT 2 — ENTRY POINT NAMES
+// ---------------------------------------------------------------------------
+// The chain stores each verifier key under the entry point name your deployed
+// contract exported, and consumers look keys up by that name. Export each circuit
+// here under exactly the deployed name, even though the key does not depend on it.
+//
+// ---------------------------------------------------------------------------
+// WHAT TO PUT HERE
+// ---------------------------------------------------------------------------
+//   * Only impure, witness-free circuits. A circuit that calls a witness takes a
+//     private input; it is not a read and the consumer tool refuses to run it.
+//   * Only circuits you are willing to publish the body of. Unpublished circuits
+//     keep their bodies private; their entry point names and verifier keys are
+//     visible on chain regardless.
+//   * `publishBundle` itself does not need to be listed: consumers do not execute
+//     it.
+
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+
+// TODO(1): import the SAME module your deployed contract imports, by a path
+// relative to this file. For a contract built on this repository's OpenZeppelin
+// integrations that is, for example:
+//
+//     import "../integrations/openzeppelin/FungibleTokenReadable" prefix FungibleTokenReadable_;
+//
+import "./TODO_ReplaceWithYourModule" prefix YourModule_;
+
+// Re-export the standard library types your circuit signatures mention, so the
+// generated TypeScript declares them. Drop any you do not use.
+export { ContractAddress, Either, Maybe };
+
+// TODO(2): one export per circuit you publish, named exactly as the deployed
+// contract exports it. Example shape:
+
+export circuit exampleRead(id: Uint<128>): Opaque<"string"> {
+  return YourModule_exampleRead(id);
+}
+
+// ---------------------------------------------------------------------------
+// THEN
+// ---------------------------------------------------------------------------
+//   compact compile <this file> out/interface
+//   coc-deploy-check --interface out/interface --interface-src <this file> \
+//                    --full out/full --url https://you.example/bundle/
+//   publish the printed bundle directory at that URL, verbatim
+//   call publishBundle(<printed payload>) once, from any account that can call
+//     your contract
+//
+// See docs/INTEGRATION.md for the full procedure.

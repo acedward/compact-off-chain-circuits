@@ -34,6 +34,8 @@ export const SCENARIOS = {
   fungible: {
     witnessName: 'wit_FungibleTokenSK',
     constructorArgs: ['Readable Token', 'RDT', 18n, true],
+    // `init: false` leaves the contract unitialized, so every read asserts.
+    uninitializedArgs: ['', '', 0n, false],
     populate: async (call) => {
       await call('_mint', user('alice'), 1_000_000n);
       await call('_mint', user('bob'), 250n);
@@ -43,6 +45,7 @@ export const SCENARIOS = {
   nft: {
     witnessName: 'wit_NonFungibleTokenSK',
     constructorArgs: ['Readable NFT', 'RNFT', true],
+    uninitializedArgs: ['', '', false],
     populate: async (call) => {
       await call('_mint', user('alice'), 1n);
       await call('_setTokenURI', 1n, 'https://nft.example/meta/1.json');
@@ -53,6 +56,7 @@ export const SCENARIOS = {
   multi: {
     witnessName: 'wit_MultiTokenSK',
     constructorArgs: [{ is_some: true, value: 'https://multi.example/{id}.json' }],
+    uninitializedArgs: [{ is_some: false, value: '' }],
     populate: async (call) => {
       await call('_mint', user('alice'), 1n, 10n);
       await call('_mint', user('bob'), 2n, 5n);
@@ -64,7 +68,7 @@ export const SCENARIOS = {
  * Build the state of a deployed, populated example contract.
  * @returns {Promise<{ state, callCircuit, operations }>}
  */
-export async function deploySimulated(example, { repo = REPO } = {}) {
+export async function deploySimulated(example, { repo = REPO, initialized = true } = {}) {
   const scenario = SCENARIOS[example];
   if (!scenario) throw new Error(`unknown example '${example}'`);
   const fullOut = join(repo, 'build', example, 'full');
@@ -77,7 +81,8 @@ export async function deploySimulated(example, { repo = REPO } = {}) {
   const contract = new Contract({ [scenario.witnessName]: () => [privateState, new Uint8Array(32)] });
 
   const { currentContractState: state } = await contract.initialState(
-    rt.createConstructorContext(privateState, COIN_PK), ...scenario.constructorArgs,
+    rt.createConstructorContext(privateState, COIN_PK),
+    ...(initialized ? scenario.constructorArgs : scenario.uninitializedArgs),
   );
 
   // A real deploy installs the verifier keys; a locally built state has none.
@@ -93,7 +98,7 @@ export async function deploySimulated(example, { repo = REPO } = {}) {
     state.data = r.context.callContext.currentQueryContext.state;
     return r;
   };
-  await scenario.populate(callCircuit);
+  if (initialized) await scenario.populate(callCircuit);
   return { state, callCircuit, operations: state.operations() };
 }
 
@@ -101,8 +106,8 @@ export async function deploySimulated(example, { repo = REPO } = {}) {
  * Deploy-simulate, publish the bundle event, and return the two consumer inputs.
  * `payload` is asserted against the payload read back out of the emitted event.
  */
-export async function simulate(example, { bundleDir, url, repo = REPO } = {}) {
-  const { state, callCircuit, operations } = await deploySimulated(example, { repo });
+export async function simulate(example, { bundleDir, url, repo = REPO, initialized = true } = {}) {
+  const { state, callCircuit, operations } = await deploySimulated(example, { repo, initialized });
   const hash = bundleHash(bundleDir);
   const payload = assemblePayload(hash, url);
   const r = await callCircuit('publishBundle', Uint8Array.from(payload));

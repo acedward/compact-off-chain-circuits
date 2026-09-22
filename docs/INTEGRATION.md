@@ -20,10 +20,17 @@ erased by the compiler and do not affect the key.
    deployed contract's ledger slots in the original order with the original
    types. Importing the *same module* the deployed contract imports does this by
    construction and is the recommended way. If your ledger is declared inline in
-   the contract, repeat every declaration in the interface, in order; you may
-   rename them, and you may append new ones after all of them. Inserting or
-   reordering a declaration that precedes a slot a published circuit reads
-   changes the key.
+   the contract, repeat every declaration in the interface, in the original
+   order; you may rename them, and you may append new ones after all of them.
+   Inserting or reordering a declaration that precedes a slot a published circuit
+   reads changes the key.
+
+   What counts is the declaration order **within the module or contract whose
+   ledger it is**, not where anything sits in your file. Measured: a ledger
+   declaration written in the interface file — on either side of the `import`
+   line — always takes the slot *after* every slot the imported module declares,
+   so it cannot shift them. Adding a declaration inside the module before a slot
+   a published circuit reads does shift it, and changes the key.
 2. **Entry point names.** The chain stores each verifier key under the entry
    point name your deployed contract exported, and consumers look keys up by that
    name. Export each published circuit under exactly the deployed name.
@@ -118,7 +125,9 @@ has fetched the bundle needs only Node and one npm dependency
 (`@midnight-ntwrk/compact-runtime`):
 
 ```sh
-cd bundle && npm install && node verify.mjs --indexer <url> --address <hex> --circuit tokenURI --args 1
+cd bundle
+npm install --no-package-lock     # a lock file in the bundle changes its hash
+node verify.mjs --indexer <url> --address <hex> --circuit tokenURI --args 1
 ```
 
 Without an indexer that serves events (indexer < 4.4.0), or offline, the same
@@ -143,7 +152,14 @@ What they get:
   removes you from the trust chain.
 
 The tool prints the level it reached, and for indexer input the block height and
-transaction hash of the state it read.
+transaction hash of the state it read. Its exit status is 0 when everything
+asked for verified, 1 when a verification level failed (in which case nothing was
+executed), 2 for a usage or input error, and 3 when the checks passed but the
+circuit rejected the arguments.
+
+Level 2 also compares the shipped keys with the `expectedVk` table the compiler
+embeds in `index.js`, which catches a bundle assembled from artifacts of two
+different compilations.
 
 ## Checklist
 

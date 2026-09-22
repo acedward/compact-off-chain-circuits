@@ -27,6 +27,11 @@
 //   * If your contract declares its ledger inline, repeat EVERY declaration here
 //     in the original order with the original types. You may rename them. You may
 //     append extra declarations AFTER all of them.
+//   * What counts is the declaration order inside the module or contract whose
+//     ledger it is. A ledger declaration written in THIS file always takes the
+//     slot after every slot the imported module declares, wherever you put it
+//     relative to the import line, so it cannot shift them. Changing the order
+//     inside the module can.
 //   * Inserting or reordering a declaration that precedes a slot a published
 //     circuit reads shifts that slot and changes the key. `deploy-check` compares
 //     against your full build and refuses to publish when that happens.

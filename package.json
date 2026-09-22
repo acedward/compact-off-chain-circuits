@@ -1,0 +1,36 @@
+{
+  "name": "compact-off-chain-circuits",
+  "version": "0.1.0",
+  "description": "Verifiable off-chain execution of Compact read circuits: bundle format, deployer pre-publish check and consumer verify tool.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "coc-verify": "src/verify.mjs",
+    "coc-deploy-check": "src/deployer.mjs"
+  },
+  "compact": {
+    "compiler": "0.34.0",
+    "language": "0.26.0",
+    "runtime": "0.19.0"
+  },
+  "scripts": {
+    "build": "scripts/build.sh",
+    "check-keys": "node scripts/check-keys.mjs",
+    "deploy-check": "node src/deployer.mjs",
+    "verify": "node src/verify.mjs",
+    "simulate": "node scripts/simulate-deploy.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.19.0"
+  },
+  "devDependencies": {
+    "vitest": "3.2.4"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

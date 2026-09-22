@@ -1,0 +1,375 @@
+#!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// The consumer tool. Given a bundle, the contract's `bundle/v1` event and its
+// current state, it answers three questions and then runs the read:
+//
+//   Level 1  Is this bundle the one the contract committed to?   (hash)
+//   Level 2  Are the circuits in it the circuits on chain?       (verifier keys)
+//   Level 3  Does the published source really produce them?      (recompile)
+//   then     What does the circuit return for these arguments?   (execute)
+//
+// Nothing is submitted, no proof is produced and no proof provider is contacted.
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as rt from '@midnight-ntwrk/compact-runtime';
+import { NPM_ARTIFACTS, bundleHash, fileHashes, parsePayload } from './hash.mjs';
+import { fetchLatestBundleEvent, fetchState } from './indexer.mjs';
+import { CircuitAssertionError, bundleInfo, executeCircuit } from './execute.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const sha256hex = (buf) => createHash('sha256').update(buf).digest('hex');
+const keyNames = (bundleDir) =>
+  readdirSync(join(bundleDir, 'out', 'keys')).filter((f) => f.endsWith('.verifier')).sort().map((f) => f.slice(0, -'.verifier'.length));
+
+// ---------------------------------------------------------------------------
+// Level 1 — the deployer's commitment
+// ---------------------------------------------------------------------------
+export function levelOne(bundleDir, committedHash) {
+  const actual = bundleHash(bundleDir);
+  const committed = Buffer.from(committedHash);
+  const ok = Buffer.from(actual).equals(committed);
+  const out = { ok, actual, committed };
+  if (!ok) {
+    // By far the most common cause: the consumer ran `npm install` in the bundle
+    // and npm wrote a lock file into it. Say so instead of leaving them to guess.
+    const present = NPM_ARTIFACTS.filter((f) => existsSync(join(bundleDir, f)));
+    if (present.length && Buffer.from(bundleHash(bundleDir, { ignore: present })).equals(committed)) {
+      out.npmArtifacts = present;
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Level 2 — the deployed circuits
+// ---------------------------------------------------------------------------
+/**
+ * Every shipped verifier key must equal the key the chain stores under that
+ * entry point name. Also checks the `expectedVk` table the compiler embeds in
+ * the generated wrapper: it is the sha256 of each key the wrapper was compiled
+ * with, so a bundle assembled from artifacts of two different compilations is
+ * caught even though each artifact is individually well-formed.
+ */
+export async function levelTwo(bundleDir, stateBytes) {
+  const state = rt.ContractState.deserialize(Uint8Array.from(Buffer.from(stateBytes)));
+  const rows = [];
+  for (const name of keyNames(bundleDir)) {
+    const shipped = readFileSync(join(bundleDir, 'out', 'keys', `${name}.verifier`));
+    const onChain = state.operation(name)?.verifierKey;
+    if (!onChain) { rows.push({ circuit: name, status: 'FAIL', reason: 'no verifier key on chain for this entry point' }); continue; }
+    const ok = shipped.equals(Buffer.from(onChain));
+    rows.push({ circuit: name, status: ok ? 'OK' : 'FAIL', reason: ok ? undefined : 'shipped key differs from the key on chain' });
+  }
+  return { ok: rows.every((r) => r.status === 'OK'), rows, wrapper: await wrapperBinding(bundleDir), entryPoints: state.operations() };
+}
+
+/** Check `expectedVk` in the generated wrapper against the shipped keys. */
+export async function wrapperBinding(bundleDir) {
+  const mod = await import(pathToFileURL(resolve(join(bundleDir, 'out', 'contract', 'index.js'))).href);
+  const expected = mod.expectedVk;
+  if (!expected) return { ok: true, skipped: true, reason: 'this compiler emits no expectedVk table' };
+  const rows = [];
+  for (const name of keyNames(bundleDir)) {
+    const want = expected[name];
+    const got = sha256hex(readFileSync(join(bundleDir, 'out', 'keys', `${name}.verifier`)));
+    rows.push({ circuit: name, status: want === got ? 'OK' : 'FAIL', want, got });
+  }
+  return { ok: rows.every((r) => r.status === 'OK'), rows };
+}
+
+// ---------------------------------------------------------------------------
+// Level 3 — the published source
+// ---------------------------------------------------------------------------
+/** Recompile the published source and compare with everything shipped. */
+export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 'compact' } = {}) {
+  const pkg = JSON.parse(readFileSync(join(bundleDir, 'package.json'), 'utf8'));
+  const pinned = pkg.compact ?? {};
+  const src = join(bundleDir, pinned.interface ?? '');
+  if (!pinned.interface || !existsSync(src)) {
+    return { ok: false, rows: [], error: `bundle package.json does not point at a published source (compact.interface)` };
+  }
+  let installed = null;
+  try { installed = execFileSync(compactBin, ['compile', '--version'], { encoding: 'utf8' }).trim(); }
+  catch { return { ok: false, rows: [], pinned, error: `'${compactBin}' is not runnable; Level 3 needs the pinned compact toolchain installed` }; }
+
+  const out = mkdtempSync(join(tmpdir(), 'coc-l3-'));
+  try {
+    try {
+      execFileSync(compactBin, ['compile', src, out], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      return { ok: false, rows: [], pinned, installed, error: `recompile failed: ${String(e.stderr || e.message).split('\n')[0]}` };
+    }
+    const rows = [];
+    for (const name of keyNames(bundleDir)) {
+      const a = readFileSync(join(bundleDir, 'out', 'keys', `${name}.verifier`));
+      const p = join(out, 'keys', `${name}.verifier`);
+      if (!existsSync(p)) { rows.push({ item: `${name}.verifier`, status: 'FAIL', reason: 'not produced by the recompile' }); continue; }
+      rows.push({ item: `${name}.verifier`, status: a.equals(readFileSync(p)) ? 'OK' : 'FAIL' });
+    }
+    const shippedJs = readFileSync(join(bundleDir, 'out', 'contract', 'index.js'));
+    const rebuiltJs = readFileSync(join(out, 'contract', 'index.js'));
+    rows.push({ item: 'contract/index.js', status: shippedJs.equals(rebuiltJs) ? 'OK' : 'FAIL' });
+    const ok = rows.every((r) => r.status === 'OK');
+    const versionMismatch = pinned.compiler && installed && !installed.includes(pinned.compiler);
+    return { ok, rows, pinned, installed, versionMismatch };
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Orchestration
+// ---------------------------------------------------------------------------
+/**
+ * Run the checks and, if a circuit is named, the read.
+ *
+ * Inputs are either `{ indexerUrl, address }` or `{ eventPayload, stateBytes }`.
+ * Returns a structured result; never throws for a failed check, only for a
+ * malformed request.
+ */
+export async function verify({ bundleDir, indexerUrl, address, eventPayload, stateBytes, circuit, args = [], level = 2, compactBin }) {
+  const result = { bundleDir, level: 0, requestedLevel: level, checks: {}, source: {} };
+
+  if (indexerUrl) {
+    if (!address) throw new Error('--indexer needs --address');
+    const event = await fetchLatestBundleEvent(indexerUrl, address);
+    if (!event) throw new Error(`contract ${address} has published no bundle/v1 event: no published interface`);
+    const st = await fetchState(indexerUrl, address);
+    eventPayload = event.payload;
+    stateBytes = st.state;
+    result.source = {
+      from: 'indexer', indexerUrl, address,
+      eventId: event.id, supersededIds: event.supersededIds,
+      blockHeight: st.blockHeight, txHash: st.txHash,
+    };
+  } else {
+    if (!eventPayload || !stateBytes) throw new Error('supply either --indexer/--address or --event-payload/--state');
+    result.source = { from: 'files' };
+  }
+
+  const { hash: committedHash, url } = parsePayload(eventPayload);
+  result.event = { url, hash: Buffer.from(committedHash).toString('hex') };
+
+  result.checks.level1 = levelOne(bundleDir, committedHash);
+  if (!result.checks.level1.ok) return result;
+  result.level = 1;
+
+  result.checks.level2 = await levelTwo(bundleDir, stateBytes);
+  if (!result.checks.level2.ok || !result.checks.level2.wrapper.ok) return result;
+  result.level = 2;
+
+  if (level >= 3) {
+    result.checks.level3 = levelThree(bundleDir, { compactBin });
+    if (!result.checks.level3.ok) return result;
+    result.level = 3;
+  }
+
+  if (circuit) {
+    try {
+      const { value, text } = await executeCircuit({ bundleDir, stateBytes, circuitName: circuit, args });
+      result.execution = { circuit, args, ok: true, value, text };
+    } catch (e) {
+      result.execution = { circuit, args, ok: false, assertion: e instanceof CircuitAssertionError, message: e.message };
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+const USAGE = `coc-verify — execute a published contract read circuit and check it is the deployed one
+
+  verify --bundle <dir> --indexer <graphql url> --address <hex> --circuit <name> [--args ...]
+  verify --bundle <dir> --event-payload <hex> --state <hex|file> --circuit <name> [--args ...]
+
+  --bundle <dir>          bundle directory (default: this script's directory)
+  --indexer <url>         indexer GraphQL endpoint, e.g. https://host/api/v4/graphql
+  --address <hex>         contract address
+  --event-payload <hex>   256-byte bundle/v1 payload, instead of --indexer
+  --state <hex|file>      serialized contract state, instead of --indexer
+  --circuit <name>        circuit to execute (omit to only verify)
+  --args <...>            arguments for it, one CLI token each
+  --level <1|2|3>         highest level to attempt (default 2; 3 needs the pinned compiler)
+  --json                  machine-readable output
+  --list                  list the circuits this bundle publishes and exit
+
+Exit status: 0 verified; 1 a verification level failed (nothing executed);
+2 usage or input error; 3 verified, but the circuit rejected these arguments.
+`;
+
+export function parseArgv(argv) {
+  const o = { args: [], level: 2 };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    const next = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
+    switch (a) {
+      case '--bundle': o.bundleDir = next(); break;
+      case '--indexer': o.indexerUrl = next(); break;
+      case '--address': o.address = next(); break;
+      case '--event-payload': o.eventPayloadHex = next(); break;
+      case '--state': o.state = next(); break;
+      case '--circuit': o.circuit = next(); break;
+      case '--level': o.level = Number(next()); break;
+      case '--json': o.json = true; break;
+      case '--list': o.list = true; break;
+      case '--compact-bin': o.compactBin = next(); break;
+      case '-h': case '--help': o.help = true; break;
+      case '--args': while (i + 1 < argv.length && !argv[i + 1].startsWith('--')) o.args.push(argv[++i]); break;
+      default: throw new Error(`unknown option ${a}`);
+    }
+  }
+  return o;
+}
+
+function readStateArg(s) {
+  if (existsSync(s)) {
+    const raw = readFileSync(s);
+    const text = raw.toString('utf8').trim();
+    return /^[0-9a-fA-F]+$/.test(text) ? Buffer.from(text, 'hex') : raw;
+  }
+  return Buffer.from(s.replace(/^0x/i, ''), 'hex');
+}
+
+async function main(argv) {
+  let o;
+  try { o = parseArgv(argv); } catch (e) { console.error(`error: ${e.message}\n\n${USAGE}`); process.exit(2); }
+  if (o.help) { console.log(USAGE); return 0; }
+
+  const bundleDir = resolve(o.bundleDir ?? HERE);
+  if (!existsSync(join(bundleDir, 'out', 'compiler', 'contract-info.json'))) {
+    console.error(`error: ${bundleDir} is not a bundle (no out/compiler/contract-info.json); pass --bundle`);
+    process.exit(2);
+  }
+  if (o.list) {
+    const info = bundleInfo(bundleDir);
+    for (const c of info.circuits) {
+      console.log(`${c.name}(${c.arguments.map((a) => `${a.name}: ${renderType(a.type)}`).join(', ')}): ${renderType(c['result-type'])}`);
+    }
+    return 0;
+  }
+
+  let result;
+  try {
+    result = await verify({
+      bundleDir,
+      indexerUrl: o.indexerUrl,
+      address: o.address,
+      eventPayload: o.eventPayloadHex ? Buffer.from(o.eventPayloadHex.replace(/^0x/i, ''), 'hex') : undefined,
+      stateBytes: o.state ? readStateArg(o.state) : undefined,
+      circuit: o.circuit,
+      args: o.args,
+      level: o.level,
+      compactBin: o.compactBin,
+    });
+  } catch (e) {
+    console.error(`error: ${e.message}`);
+    process.exit(2);
+  }
+
+  if (o.json) {
+    console.log(JSON.stringify(jsonSafe(result), null, 2));
+  } else {
+    printReport(result);
+  }
+  // 0 verified (and, if asked, the circuit returned a value)
+  // 1 a verification level failed — nothing was executed
+  // 2 usage or input error
+  // 3 verified, but the circuit rejected these arguments (a failed assert)
+  if (result.level < Math.min(result.requestedLevel, 3)) return 1;
+  if (result.execution?.ok === false) return result.execution.assertion ? 3 : 1;
+  return 0;
+}
+
+/** Byte arrays as hex, BigInt as decimal string; everything else unchanged. */
+export function jsonSafe(v) {
+  if (typeof v === 'bigint') return v.toString(10);
+  if (v instanceof Uint8Array) return Buffer.from(v).toString('hex');
+  if (Array.isArray(v)) return v.map(jsonSafe);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, jsonSafe(x)]));
+  return v;
+}
+
+export function printReport(r) {
+  const { checks } = r;
+  console.log(`bundle      : ${r.bundleDir}`);
+  if (r.source.from === 'indexer') {
+    console.log(`indexer     : ${r.source.indexerUrl}`);
+    console.log(`contract    : ${r.source.address}`);
+    console.log(`event       : id ${r.source.eventId}${r.source.supersededIds?.length ? ` (supersedes ${r.source.supersededIds.join(', ')})` : ''}`);
+    console.log(`state       : block ${r.source.blockHeight}, tx ${r.source.txHash}`);
+  } else {
+    console.log('input       : event payload and state supplied directly (no indexer)');
+  }
+  console.log(`event url   : ${r.event.url}`);
+  console.log(`event hash  : ${r.event.hash}`);
+
+  const l1 = checks.level1;
+  console.log(`L1 ${l1.ok ? 'OK  ' : 'FAIL'} bundle hash ${Buffer.from(l1.actual).toString('hex')}`);
+  if (!l1.ok) {
+    console.log('     the bundle at this URL is not the one the contract committed to; nothing was executed.');
+    if (l1.npmArtifacts) {
+      console.log(`     ${l1.npmArtifacts.join(', ')} ${l1.npmArtifacts.length > 1 ? 'are' : 'is'} not part of the bundle: without ${l1.npmArtifacts.length > 1 ? 'them' : 'it'} the hash matches.`);
+      console.log('     your own `npm install` wrote it here. Delete it, or install with `npm install --no-package-lock`.');
+    }
+    console.log('     per-file hashes, for locating the difference:');
+    for (const [p, h] of fileHashes(r.bundleDir)) console.log(`       ${h}  ${p}`);
+  }
+
+  if (checks.level2) {
+    for (const row of checks.level2.rows) console.log(`L2 ${row.status === 'OK' ? 'OK  ' : 'FAIL'} vk ${row.circuit}${row.reason ? ` — ${row.reason}` : ''}`);
+    const w = checks.level2.wrapper;
+    if (w.skipped) console.log(`L2 --   wrapper binding skipped: ${w.reason}`);
+    else for (const row of w.rows) if (row.status !== 'OK') console.log(`L2 FAIL wrapper expectedVk for ${row.circuit}: index.js expects ${row.want}, bundle ships a key hashing to ${row.got}`);
+    if (!checks.level2.ok) console.log('     the bundle does not describe the contract on chain; nothing was executed.');
+  }
+
+  if (checks.level3) {
+    const l3 = checks.level3;
+    if (l3.versionMismatch) console.log(`L3 WARN pinned compiler ${l3.pinned.compiler}, installed ${l3.installed} — the most likely cause of any mismatch below`);
+    if (l3.error) console.log(`L3 FAIL ${l3.error}`);
+    for (const row of l3.rows) console.log(`L3 ${row.status === 'OK' ? 'OK  ' : 'FAIL'} reproduced ${row.item}${row.reason ? ` — ${row.reason}` : ''}`);
+  }
+
+  if (r.execution) {
+    if (r.execution.ok) console.log(`${r.execution.circuit}(${r.execution.args.join(', ')}) = ${r.execution.text}`);
+    else if (r.execution.assertion) console.log(`${r.execution.circuit}(${r.execution.args.join(', ')}) rejected: ${r.execution.message}`);
+    else console.log(`${r.execution.circuit}(${r.execution.args.join(', ')}) could not be executed: ${r.execution.message}`);
+  }
+
+  console.log(`verified up to level ${r.level}${LEVEL_MEANING[r.level] ? ` — ${LEVEL_MEANING[r.level]}` : ''}`);
+}
+
+/** contract-info type -> the Compact spelling, for `--list`. */
+export function renderType(t) {
+  if (!t) return '[]';
+  switch (t['type-name']) {
+    case 'Bytes': return `Bytes<${t.length}>`;
+    case 'Uint': return `Uint<${Math.round(Math.log2(Number(t.maxval) + 1))}>`;
+    case 'Opaque': return `Opaque<"${t.tsType}">`;
+    case 'Struct':
+      if (!t.name) return 'Struct';
+      if (t.name === 'ContractAddress') return 'ContractAddress';
+      if (t.name === 'Either' || t.name === 'Maybe') {
+        return `${t.name}<${t.elements.filter((e) => e.name !== 'is_left' && e.name !== 'is_some').map((e) => renderType(e.type)).join(', ')}>`;
+      }
+      return t.name;
+    case 'Map': return `Map<${renderType(t.key)}, ${renderType(t.value)}>`;
+    default: return t['type-name'];
+  }
+}
+
+const LEVEL_MEANING = {
+  0: 'nothing proven',
+  1: 'this bundle is the one the contract committed to',
+  2: 'and its verifier keys are the ones deployed on chain',
+  3: 'and the published source regenerates those keys and this wrapper',
+};
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  process.exit(await main(process.argv.slice(2)));
+}

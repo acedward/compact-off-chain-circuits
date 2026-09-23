@@ -4,4 +4,3 @@ bundle/
 sim/
 tmp/
 .DS_Store
-package-lock.json

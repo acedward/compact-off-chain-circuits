@@ -89,5 +89,49 @@
       "status": "SucceedEntirely",
       "at": "2026-09-23T04:23:14.760Z"
     }
+  },
+  "registry": {
+    "address": "2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115",
+    "token": {
+      "name": "Off-Chain Reads Registry Token",
+      "symbol": "OCRR",
+      "decimals": 18
+    },
+    "publisherCommitment": "f92cac8d0e49d40c1a95c4c74b5eb0ef6e68163c9468e396b564db1b242c02b4",
+    "deploy": {
+      "txId": "004cc7d2aee99df95f3b59055ffcb535eafe7c9a85240bd63a34fd9e8350dc4b02",
+      "txHash": "a1470246006c40b6f97b0e3aebb167cb90a05b9d6807e9cb627dfcb81ac9ec50",
+      "blockHeight": 582857,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T04:31:32.736Z"
+    },
+    "bundles": {
+      "erc20": {
+        "url": "https://compact-off-chain-circuits.pages.dev/registry/erc20/index.json",
+        "commitment": "1149cc06377e81b07787dc3a3370e18dd3006d606c7224aedff0bb85bc2acf43",
+        "files": 17
+      },
+      "erc20-metadata": {
+        "url": "https://compact-off-chain-circuits.pages.dev/registry/erc20-metadata/index.json",
+        "commitment": "c53c75fa159d57a0741447df14037c3b6c8e293e75c2a7654807b354355c03b1",
+        "files": 14
+      }
+    },
+    "published": {
+      "erc20": {
+        "txId": "007fc84c08686cae1d696594184069e6273f3321ef2b12d7fb76fa6503afc8c1c4",
+        "txHash": "c3fb2b0f6afe0929d46826d2f53dc7f470fa30c2dae4ba33d1faa6768f8b75c3",
+        "blockHeight": 587200,
+        "status": "SucceedEntirely",
+        "at": "2026-09-23T11:46:50.194Z"
+      },
+      "erc20-metadata": {
+        "txId": "00e9d64f58b411e527f15c337b441f1a74d6e7de4ace08674fb4615c52fcb7149a",
+        "txHash": "33f7f886a91adc31a5d0d529afd3da8cab46ff47cec550ab19668f87ce310bef",
+        "blockHeight": 587203,
+        "status": "SucceedEntirely",
+        "at": "2026-09-23T11:47:07.495Z"
+      }
+    }
   }
 }

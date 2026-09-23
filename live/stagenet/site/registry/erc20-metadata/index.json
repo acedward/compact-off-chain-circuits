@@ -1,0 +1,76 @@
+{
+  "bundle": "v1",
+  "commitment": "ecmh-jubjub-grouphash",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "b93c651826775d78cd6425d547f3ef807f6cc5940e2ec2b0ee79d2f47aff72e0",
+      "size": 2888
+    },
+    {
+      "path": "out/compiler/contract-info.json",
+      "sha256": "b598bca77101fae5fa200302c5bfe14799852a65d5a75a015efebf0e6eaede89",
+      "size": 4682
+    },
+    {
+      "path": "out/contract/index.d.ts",
+      "sha256": "22404dca5b06b1907e692897787c888783ba18ea899782aae2f352cf8f3767d2",
+      "size": 1958
+    },
+    {
+      "path": "out/contract/index.js",
+      "sha256": "c0cd8fe88c3ad96b9212d1faa941294f946f65ff36f1f5f5d2903756c25a88a6",
+      "size": 23432
+    },
+    {
+      "path": "out/contract/package.json",
+      "sha256": "5a065fe7d8eab2a582f428e11c2ea63aaf70607a54f69cfd5c711b5c53d91b32",
+      "size": 21
+    },
+    {
+      "path": "out/keys/decimals.verifier",
+      "sha256": "d953d2e9fe8b772d22a0052290c91f24ff26d80c83702e750d8e48bef434ea74",
+      "size": 1351
+    },
+    {
+      "path": "out/keys/name.verifier",
+      "sha256": "3ae424029ce913f69934ef92705e2945b968c375d205355cc40a3ebce42dd84d",
+      "size": 1351
+    },
+    {
+      "path": "out/keys/symbol.verifier",
+      "sha256": "52186c9f4c4189ff4726579cd9e64fa03eae2f4b26c177232551f5819eefbe28",
+      "size": 1351
+    },
+    {
+      "path": "package.json",
+      "sha256": "49e662e38809f67fe6c095ee5901452fa29574e28c8d37f26ba89ad835837086",
+      "size": 357
+    },
+    {
+      "path": "src/compact/OffChainInterface.compact",
+      "sha256": "43e7a0df257f54314e6a41ef48f6408e0ec6e376e47b2eb562fb84b2e609b77f",
+      "size": 1737
+    },
+    {
+      "path": "src/compact/integrations/openzeppelin/FungibleTokenReadable.compact",
+      "sha256": "2c90e72ca43cf1c092aadfa730faf4509b8d374e1752d7421c06a2373d95161b",
+      "size": 4863
+    },
+    {
+      "path": "src/compact/vendor/openzeppelin/token/FungibleToken.compact",
+      "sha256": "26f4e10c978b2742ce0c77c5aa7c8a6edfa787bba0ec6bfb81e565a61a171760",
+      "size": 28667
+    },
+    {
+      "path": "src/compact/vendor/openzeppelin/utils/Utils.compact",
+      "sha256": "ae8bc73879b86e9aaa0b36b5577d02f6ae238f1640513696469c0af7014ea283",
+      "size": 7768
+    },
+    {
+      "path": "src/live/stagenet/contracts/ERC20Metadata.Interface.compact",
+      "sha256": "1f6e96aeeaaf661118bbc7202c30b139bf9480ab60f0b1220de8ea3ff794761e",
+      "size": 658
+    }
+  ]
+}

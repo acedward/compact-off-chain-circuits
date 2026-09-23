@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// A second standard for the live registry demonstration: the ERC-20 metadata reads
+// only. Imports the same module as the deployed contract, so these three circuits
+// compile to the deployed keys.
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+import "../../../compact/integrations/openzeppelin/FungibleTokenReadable" prefix FungibleTokenReadable_;
+
+export circuit name(): Opaque<"string"> { return FungibleTokenReadable_name(); }
+export circuit symbol(): Opaque<"string"> { return FungibleTokenReadable_symbol(); }
+export circuit decimals(): Uint<8> { return FungibleTokenReadable_decimals(); }

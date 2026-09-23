@@ -15,6 +15,7 @@
 //
 // Caps: each file at the size its entry declares, and the whole bundle, index
 // included, at 64 MiB. A transfer is aborted as soon as it exceeds its cap.
+// Nothing else is limited; see SIZING_GUIDANCE for what to expect.
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +23,50 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { INDEX_FILE, IndexError, validateIndex } from './hash.mjs';
 
 export const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * What to expect from a legitimate bundle: very high estimates, NOT limits.
+ *
+ * The bundle format sets no limit on the number of files, their sizes, or how
+ * long fetching takes, and nothing below is enforced. The only hard stop in this
+ * tool is MAX_BUNDLE_BYTES, four times the `bundleBytes` estimate. The numbers
+ * are generous upper bounds, sized for an interface that publishes about 1,000
+ * read circuits, far more than any contract in this repository, so a caller that
+ * wants limits can start from them.
+ *
+ * Measured on the examples (5 to 6 published circuits) at the time of writing:
+ * 13 to 17 listed files, a 2 to 3 KB index.json, 86 to 122 KB in total, the largest
+ * file a 44 KB generated wrapper, 7 ms to compute the commitment, 17 requests,
+ * about 1 s to recompile the interface for Level 3. Each published circuit adds
+ * about 10.6 KB of compiled output (a 1,351-byte verifier key, about 7 KB of
+ * wrapper, the rest typings and contract description) and one index entry of
+ * about 157 bytes that costs about 0.35 ms of group hashing.
+ *
+ * Why a caller may want limits: anyone able to call the contract's
+ * publishBundle chooses the URL (unless the contract restricts that circuit), so
+ * an unattended verifier such as an indexer or a wallet backend fetches
+ * attacker-chosen hosts. A hostile index can list many or large files, a slow
+ * host can stall a fetch indefinitely (this tool sets no timeout; run it in a
+ * process you can kill after your own deadline), and a URL can point at an
+ * internal address. Such a service should also refuse private and loopback
+ * destinations.
+ *
+ * Why a caller may not want them, or should keep them generous: a limit near
+ * today's sizes rejects legitimate large bundles later; an interactive user can
+ * simply cancel; and limits protect resources, not correctness, because the
+ * commitment and each file's sha256 already decide what is genuine. A bundle
+ * stopped by a local limit has not been checked, so report it as unchecked,
+ * never as invalid.
+ */
+export const SIZING_GUIDANCE = Object.freeze({
+  files: 1000,                       // entries in index.json
+  indexBytes: 256 * 1024,            // index.json itself
+  bundleBytes: 16 * 1024 * 1024,     // every listed file together
+  fileBytes: 8 * 1024 * 1024,        // the largest single file, normally out/contract/index.js
+  commitmentSeconds: 1,              // group hashing all entries
+  fetchSeconds: 300,                 // files are fetched one at a time; this is 1,000 files at 0.3 s each
+  level3Seconds: 1800,               // recompiling a very large interface with the pinned compiler
+});
 
 /** Every reason Level 1 can fail while obtaining the bundle. `file` names the file at fault, if any. */
 export class BundleError extends Error {

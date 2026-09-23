@@ -46,10 +46,25 @@ else) and import it from your contract, then re-export its one circuit:
 ```compact
 import "./OffChainInterface" prefix OffChainInterface_;
 
+// Optional, and not covered by this pattern: only the holder of a secret may publish.
+// witness publisherSecret(): Bytes<32>;
+// export ledger publisher: Bytes<32>;   // set in the constructor to the hash checked below
+
 export circuit publishBundle(payload: Bytes<256>): [] {
+  // assert(persistentHash<Vector<2, Bytes<32>>>([pad(32, "coc:publisher:"), publisherSecret()]) == publisher,
+  //        "only the publisher can publish a bundle");
   return OffChainInterface_publishBundle(payload);
 }
 ```
+
+`publishBundle` has no access control of its own. Without a check like the
+commented one, anyone who can call your contract can publish a newer bundle
+event, and consumers take the latest; at Levels 1 and 2 they would then run
+that party's wrapper. To use the check, uncomment it, set `publisher` in the
+constructor to `persistentHash<Vector<2, Bytes<32>>>([pad(32, "coc:publisher:"), secret])`
+computed off chain, and supply `publisherSecret` from your private state when
+you call `publishBundle`. The uncommented form compiles as written; any other
+authorization, such as an owner module, works as well.
 
 If your contract's state lives in a module, put the import in that module instead
 and re-export `publishBundle` from the contract — that is what

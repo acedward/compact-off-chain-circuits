@@ -124,6 +124,11 @@ const onlyKeys = (obj, allowed, where) => {
 /**
  * Check an index against the format and the path rules. Returns it unchanged,
  * or throws IndexError naming the first problem.
+ *
+ * The format does not limit the number of entries. Each one costs about 0.35 ms
+ * of group hashing when the commitment is computed, so 1,000 entries take about
+ * 0.4 s and 10,000 about 3.5 s. See SIZING_GUIDANCE in fetch.mjs for the very
+ * high estimates a caller can base its own limits on.
  */
 export function validateIndex(index) {
   if (!index || typeof index !== 'object' || Array.isArray(index)) throw new IndexError('index.json is not a JSON object');

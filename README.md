@@ -15,14 +15,43 @@ For a contract author. The full procedure and a checklist are in [docs/INTEGRATI
    ```compact
    import "./OffChainInterface" prefix OffChainInterface_;
 
+   // Optional, and not covered by this pattern: only the holder of a secret may publish.
+   // witness publisherSecret(): Bytes<32>;
+   // export ledger publisher: Bytes<32>;   // set in the constructor to the hash checked below
+
    export circuit publishBundle(payload: Bytes<256>): [] {
+     // assert(persistentHash<Vector<2, Bytes<32>>>([pad(32, "coc:publisher:"), publisherSecret()]) == publisher,
+     //        "only the publisher can publish a bundle");
      return OffChainInterface_publishBundle(payload);
    }
    ```
 
+   Without a check like the commented one, anyone who can call the contract can publish a newer bundle event. Uncommented, the check compiles as written.
+
    The OpenZeppelin examples in `compact/integrations/openzeppelin/` show this step applied to unmodified OpenZeppelin token modules.
 
-2. **Write the interface.** Copy `compact/templates/Interface.template.compact`, import the same module your contract imports, and export the read circuits you want to publish under their deployed names. The OpenZeppelin examples include theirs as `*.Interface.compact`.
+2. **Write the interface.** Copy `compact/templates/Interface.template.compact`, import the same module your contract imports, and export the read circuits you want to publish under their deployed names. For an ERC-20 style token, the interface publishes the six ERC-20 reads, as in `compact/integrations/openzeppelin/FungibleTokenReadable.Interface.compact`:
+
+   ```compact
+   pragma language_version >= 0.23.0;
+   import CompactStandardLibrary;
+   import "./FungibleTokenReadable" prefix FungibleTokenReadable_;
+   export { ContractAddress, Either, Maybe };
+
+   export circuit name(): Opaque<"string"> { return FungibleTokenReadable_name(); }
+   export circuit symbol(): Opaque<"string"> { return FungibleTokenReadable_symbol(); }
+   export circuit decimals(): Uint<8> { return FungibleTokenReadable_decimals(); }
+   export circuit totalSupply(): Uint<128> { return FungibleTokenReadable_totalSupply(); }
+   export circuit balanceOf(account: Either<Bytes<32>, ContractAddress>): Uint<128> {
+     return FungibleTokenReadable_balanceOf(account);
+   }
+   export circuit allowance(owner: Either<Bytes<32>, ContractAddress>,
+                            spender: Either<Bytes<32>, ContractAddress>): Uint<128> {
+     return FungibleTokenReadable_allowance(owner, spender);
+   }
+   ```
+
+   Transfers, approvals and minting stay unpublished. Their bodies stay private, though their entry point names are visible on chain.
 
 3. **Build both.**
 
@@ -81,13 +110,33 @@ Once the levels pass, `verify` runs the circuit through the bundle's generated w
 
 **Event.** `publishBundle` emits `Misc { name: pad(32, "bundle/v1"), payload }`. Bytes 0 to 31 of the payload are the commitment, and bytes 32 to 255 are the UTF-8 URL of `index.json`, zero padded. The caller assembles the payload because Compact has no byte concatenation. The emitting contract's address is the provenance.
 
-**Bundle.** A directory with `index.json` at its root. The index lists every other file with its `path`, `sha256` and `size`, and paths resolve relative to the index URL. The files are the partial source and the modules it imports under `src/`, one verifier key per published circuit under `out/keys/`, the generated wrapper `out/contract/index.js` with its typings, the compiler's `out/compiler/contract-info.json`, a `package.json` pinning the compiler, language and runtime versions, and a README. The example bundles are 85 to 121 KB, with a 2 to 3 KB index. The prover keys and zkir they leave out are 81 to 87 MB per example.
+**Bundle.** A directory with `index.json` at its root. The index lists every other file with its `path`, `sha256` and `size`, and paths resolve relative to the index URL. The files are the partial source and the modules it imports under `src/`, one verifier key per published circuit under `out/keys/`, the generated wrapper `out/contract/index.js` with its typings, the compiler's `out/compiler/contract-info.json`, a `package.json` pinning the compiler, language and runtime versions, and a README. The example bundles are 86 to 122 KB, with a 2 to 3 KB index. The prover keys and zkir they leave out are 81 to 87 MB per example.
 
 **Commitment.** A multiset hash on JubJub, the curve behind Compact's `JubjubPoint`. Each listed file becomes a curve point through Zcash's Sapling group hash of `sha256(path) ‖ sha256(file)`, with personalization `COC_B_v1`. The commitment is the sum of those points, encoded in 32 bytes. The order of the files does not matter, and adding or removing one is a single point addition. It deliberately does not use Compact's `hashToCurve`, which is built on Poseidon, a hash Midnight may change in a hard fork. A commitment stored on chain has to stay reproducible.
 
 **Why a partial source reproduces the keys.** A verifier key depends only on circuit logic and on the positions and types of the ledger slots the circuit reads. The compiler erases every identifier. Importing the deployed contract's module keeps its slots in the same order, so an interface exporting only some circuits compiles them to byte-identical keys. Slot order is the declaration order inside the module that owns the ledger. A ledger declared in the interface file lands after the module's slots and cannot shift them.
 
 **Execution.** Levels 2 and 3 and the circuit run on the private copy of the listed files. The verifier imports the bundle's `index.js` with its runtime import pinned to the verifier's own installed `@midnight-ntwrk/compact-runtime`. It builds a circuit context over the contract state and calls the circuit, as midnight-js does before proving, and stops there. Circuits that declare witnesses take private inputs, are not reads, and are refused.
+
+## What to expect
+
+The format sets no limit on the number of files, their sizes or fetch time, and the verifier enforces none, apart from a 64 MiB stop per bundle. The very high estimates below are for an interface publishing about 1,000 read circuits. They are suggestions for anyone who wants limits, and are exported as `SIZING_GUIDANCE` from `src/fetch.mjs`.
+
+| | Measured on the examples | Very high estimate |
+|---|---|---|
+| Files listed in `index.json` | 13 to 17 | 1,000 |
+| `index.json` | 2 to 3 KB | 256 KB |
+| Whole bundle | 86 to 122 KB | 16 MB |
+| Largest file, the generated wrapper | 44 KB | 8 MB |
+| Computing the commitment | 7 ms | 1 s |
+| Fetching the files, one at a time | 17 requests | 5 minutes |
+| Level 3 recompile | about 1 s | 30 minutes |
+
+Each published circuit adds about 10.6 KB of compiled output and one index entry.
+
+**Why you might set limits.** An unattended verifier, such as an indexer, fetches whatever URL the event names, and unless the contract restricts `publishBundle`, anyone can choose it. A hostile host can list many large files, stall a download indefinitely, since the verifier has no timeout, or point at an internal address. Run such a verifier where you can stop it after your own deadline, and refuse private and loopback addresses.
+
+**Why you might not.** Limits protect resources, not correctness, because the commitment and each file's sha256 already decide what is genuine. A limit close to today's sizes will reject legitimate larger bundles later, and an interactive user can simply cancel. A bundle stopped by a limit has not been checked, so report it as unchecked, never as invalid.
 
 ## How to test
 
@@ -134,7 +183,7 @@ docs/INTEGRATION.md                           adding the pattern to your own con
 
 ## Security considerations
 
-- Level 1 proves only that the bundle is the deployer's. A deployer can commit to a bundle that misdescribes the contract.
+- Level 1 proves the bundle is the one committed by whoever last called `publishBundle`. That is the deployer only if the contract restricts the circuit, as in the commented check under How to use. Otherwise anyone can publish a newer bundle with the genuine keys and a wrapper of their own, which only Level 3 catches. Even a deployer can commit to a bundle that misdescribes the contract.
 - Level 2 proves the shipped keys are deployed. It does not prove the shipped source or `index.js` match them, because keys derive from the circuit IR. The key hashes inside `index.js` catch a bundle mixed from two compilations, not a dishonest deployer. Level 3 closes that gap; run it once per commitment.
 - Below Level 3, `index.js` is the deployer's code running on your machine. Run it isolated if you do not trust the deployer.
 - The verifier fetches only the files `index.json` lists, into a private folder, and loads no code from them except the generated wrapper, whose runtime import it pins to its own runtime. Files a host adds, such as a planted `node_modules`, are never fetched; `test/fetch.test.mjs` and `test/runtime-pinning.test.mjs` cover this.
@@ -148,7 +197,7 @@ docs/INTEGRATION.md                           adding the pattern to your own con
 - The URL is at most 224 bytes.
 - Each bundle version costs one transaction with one proof after deployment, because constructors cannot emit. The prover key for `publishBundle` is about 67 MB, larger than any token circuit's, because the 256-byte payload is decomposed byte by byte.
 - Circuits with witnesses are refused. Reads of `boundedMerkleTree` slots are untested.
-- Downloads have size caps, but no network timeout or limit on the number of index entries yet. Add both before running the verifier unattended.
+- The verifier sets no timeout and no limit on the number of files. Read What to expect before running it unattended.
 - Not yet run against a live network. The test states are built locally, with verifier keys installed the way a deployment installs them.
 
 ## Compatibility

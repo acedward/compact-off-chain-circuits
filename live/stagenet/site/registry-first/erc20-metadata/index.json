@@ -1,0 +1,86 @@
+{
+  "bundle": "v1",
+  "commitment": "ecmh-jubjub-grouphash",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "17e3b4412f0bbb4975b32d5e9e353d94834b9cd8b929cf39b65d0217ffbf60d5",
+      "size": 2914
+    },
+    {
+      "path": "out/compiler/contract-info.json",
+      "sha256": "7a717a907e6666da914986b7b84dc70c0fe8fbc9637a9f82eb97e7c2cccd7ec8",
+      "size": 5302
+    },
+    {
+      "path": "out/contract/index.d.ts",
+      "sha256": "22404dca5b06b1907e692897787c888783ba18ea899782aae2f352cf8f3767d2",
+      "size": 1958
+    },
+    {
+      "path": "out/contract/index.js",
+      "sha256": "f445e861f0c79b62b0cc1aef76e28af34a2f3211aedcf5bf5a23a621be2c4502",
+      "size": 24863
+    },
+    {
+      "path": "out/contract/package.json",
+      "sha256": "5a065fe7d8eab2a582f428e11c2ea63aaf70607a54f69cfd5c711b5c53d91b32",
+      "size": 21
+    },
+    {
+      "path": "out/keys/decimals.verifier",
+      "sha256": "bb82dadf1b29b089eb223c64b37e46347087daa528544cdf4bdf6166515ea347",
+      "size": 1351
+    },
+    {
+      "path": "out/keys/name.verifier",
+      "sha256": "ab8188a3407b3cc482d7eb0e698e22df009e1045e1cfa6498e2e08dbd9311d19",
+      "size": 1351
+    },
+    {
+      "path": "out/keys/symbol.verifier",
+      "sha256": "c3dd112811c2ea60b8c4660a5b98a3701f47c51012ed0f410bfb3aec5680a83b",
+      "size": 1351
+    },
+    {
+      "path": "package.json",
+      "sha256": "3e8630f1d8da8bab7b0c6e314b9e16964b4f939047707d880ed9c836f07c038d",
+      "size": 385
+    },
+    {
+      "path": "src/compact/OffChainInterface.compact",
+      "sha256": "43e7a0df257f54314e6a41ef48f6408e0ec6e376e47b2eb562fb84b2e609b77f",
+      "size": 1737
+    },
+    {
+      "path": "src/compact/integrations/openzeppelin/FungibleTokenReadable.compact",
+      "sha256": "2c90e72ca43cf1c092aadfa730faf4509b8d374e1752d7421c06a2373d95161b",
+      "size": 4863
+    },
+    {
+      "path": "src/compact/registry/InterfaceRegistry.compact",
+      "sha256": "5399a7e0b3e432775051873b9ff1dd8bc9e1d6cbdf02e3ba07352fc4a9596fea",
+      "size": 3906
+    },
+    {
+      "path": "src/compact/registry/InterfaceTypes.compact",
+      "sha256": "69f4ea49bd78b775fa7719a0ccd78e0f9c868200691f1a4371a5d9d2f87fb0c7",
+      "size": 1168
+    },
+    {
+      "path": "src/compact/vendor/openzeppelin/token/FungibleToken.compact",
+      "sha256": "26f4e10c978b2742ce0c77c5aa7c8a6edfa787bba0ec6bfb81e565a61a171760",
+      "size": 28667
+    },
+    {
+      "path": "src/compact/vendor/openzeppelin/utils/Utils.compact",
+      "sha256": "ae8bc73879b86e9aaa0b36b5577d02f6ae238f1640513696469c0af7014ea283",
+      "size": 7768
+    },
+    {
+      "path": "src/live/stagenet/contracts/ERC20Metadata.RegistryFirst.Interface.compact",
+      "sha256": "76cfa3d5a2462341ad422ac5957eda7880608638e7ba84becd19efed88074297",
+      "size": 781
+    }
+  ]
+}

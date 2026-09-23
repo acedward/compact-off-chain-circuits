@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: Apache-2.0
+// compact-off-chain-circuits — published interface (partial source) for
+// `compact/examples/registry-first/Full.compact` (placement P3).
+//
+// Same six ERC-20 reads as
+// `compact/integrations/openzeppelin/FungibleTokenReadable.Interface.compact`,
+// but the deployed contract imports `InterfaceRegistry` before the token
+// module, so the registry is ledger field 0 and every token field sits one
+// position later. This file therefore imports the SAME two modules in the SAME
+// order; its keys equal the registry-first contract's and differ from the plain
+// fungible example's. Declares no ledger of its own.
+
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+import "../../registry/InterfaceRegistry" prefix InterfaceRegistry_;   // FIRST, as deployed
+import "../../integrations/openzeppelin/FungibleTokenReadable" prefix FungibleTokenReadable_;
+
+export { ContractAddress, Either, Maybe };
+
+export circuit name(): Opaque<"string"> {
+  return FungibleTokenReadable_name();
+}
+
+export circuit symbol(): Opaque<"string"> {
+  return FungibleTokenReadable_symbol();
+}
+
+export circuit decimals(): Uint<8> {
+  return FungibleTokenReadable_decimals();
+}
+
+export circuit totalSupply(): Uint<128> {
+  return FungibleTokenReadable_totalSupply();
+}
+
+export circuit balanceOf(account: Either<Bytes<32>, ContractAddress>): Uint<128> {
+  return FungibleTokenReadable_balanceOf(account);
+}
+
+export circuit allowance(
+  owner: Either<Bytes<32>, ContractAddress>,
+  spender: Either<Bytes<32>, ContractAddress>
+): Uint<128> {
+  return FungibleTokenReadable_allowance(owner, spender);
+}

@@ -8,13 +8,16 @@
 //   npx wrangler pages deploy site --project-name compact-off-chain-circuits --branch main
 //   node --env-file=../../.env deploy.mjs publish    check the hosted bundle, then call publishBundle(payload)
 //
-// Every result is recorded in deployment.json and a step already recorded is skipped.
+// The 00022 placement steps are listed in README.md (Placements); `reg-*` take `first` or
+// `last` (default). Every result is recorded in deployment.json and a step already recorded
+// is skipped.
 // Needs the repository built (scripts/build.sh), contracts/ERC20Live compiled, and a proof
 // server at MN_PROOF_SERVER_URL.
 // Reads STAGENET_WALLET_MNEMONIC; the seed is derived in memory and never printed.
 // Wallet and provider wiring follows the Stagenet deployment scripts of the earlier
 // ERC-7496 token-metadata contracts (commit 17216362),
 // scripts/deploy-and-publish.ts, which deployed to Stagenet with the same toolchain.
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -472,21 +475,113 @@ async function stepSlot15() {
 }
 
 // ---------------------------------------------------------------------------
-// 00022 placement P4: registry map declared as the contract's last ledger field
+// 00022 MinoCrab: ERC20Live compiled with --feature-zkir-v3, publishBundle from MinoCrab
 // ---------------------------------------------------------------------------
-const REG_OUT = join(HERE, 'contracts', 'managed', 'ERC20LiveRegistry');
-const META_SRC = join(HERE, 'contracts', 'ERC20Metadata.Interface.compact');
-const META_OUT = join(HERE, 'contracts', 'managed', 'ERC20Metadata');
-const REG_TOKEN = { name: 'Off-Chain Reads Registry Token', symbol: 'OCRR', decimals: 18n };
-const REG_STANDARDS = {
-  erc20: { interfaceSrc: INTERFACE_SRC, interfaceOut: INTERFACE_OUT, url: 'https://compact-off-chain-circuits.pages.dev/registry/erc20/index.json' },
-  'erc20-metadata': { interfaceSrc: META_SRC, interfaceOut: META_OUT, url: 'https://compact-off-chain-circuits.pages.dev/registry/erc20-metadata/index.json' },
+// MINOCRAB_OUT is a `compact compile --feature-zkir-v3` output of contracts/ERC20Live.compact
+// in which publishBundle's prover key, verifier key and zkir were replaced by MinoCrab's
+// (k = 11) and compiler/contract-manifest.json rewritten to match; the other six circuits are
+// compactc's. It is built outside this repository (docs/PLACEMENTS.md, MinoCrab).
+const MINOCRAB_TOKEN = { name: 'Off-Chain Reads MinoCrab Token', symbol: 'OCRM', decimals: 18n };
+const V3_INTERFACE_OUT = join(HERE, 'contracts', 'managed', 'FungibleTokenReadable.Interface-v3');
+const minocrabOut = () => {
+  const dir = process.env.MINOCRAB_OUT;
+  if (!dir || !existsSync(join(dir, 'keys', 'publishBundle.verifier'))) throw new Error('set MINOCRAB_OUT to the swapped --feature-zkir-v3 build of ERC20Live');
+  return dir;
 };
+const sha256hex = (bytes) => createHash('sha256').update(bytes).digest('hex');
+
+async function stepMinocrabContract() {
+  const out = minocrabOut();
+  record.minocrab ??= {};
+  if (record.minocrab.address) { log('minocrab.already', { address: record.minocrab.address }); return; }
+  await withContract(async ({ providers, compiledContract }) => {
+    const holder = { is_left: true, left: new Uint8Array(DEMO_HOLDER), right: { bytes: new Uint8Array(32) } };
+    const started = Date.now();
+    const contract = await deployContract(providers, {
+      compiledContract,
+      args: [MINOCRAB_TOKEN.name, MINOCRAB_TOKEN.symbol, MINOCRAB_TOKEN.decimals, holder, SUPPLY],
+      privateStateId: 'coc-erc20-minocrab',
+      initialPrivateState: {},
+    });
+    const p = contract.deployTxData.public;
+    const state = await providers.publicDataProvider.queryContractState(p.contractAddress);
+    const keys = Object.fromEntries(state.operations().map(String).sort().map((c) => [c, sha256hex(state.operation(c).verifierKey)]));
+    const minocrabKey = sha256hex(readFileSync(join(out, 'keys', 'publishBundle.verifier')));
+    record.minocrab = { address: p.contractAddress, token: { ...MINOCRAB_TOKEN, decimals: Number(MINOCRAB_TOKEN.decimals) }, deploy: txRecord(p), onChainKeys: keys, publishBundleKeyIsMinocrab: keys.publishBundle === minocrabKey };
+    save();
+    log('minocrab.deployed', { address: p.contractAddress, txHash: p.txHash, blockHeight: Number(p.blockHeight), ms: Date.now() - started, publishBundleKey: keys.publishBundle, isMinocrab: keys.publishBundle === minocrabKey });
+  }, { outDir: out });
+}
+
+async function stepMinocrabBundle() {
+  const out = minocrabOut();
+  if (!record.minocrab?.address) throw new Error('run minocrab-contract first');
+  if (!existsSync(join(V3_INTERFACE_OUT, 'keys'))) {
+    execFileSync(process.env.COMPACT_BIN || 'compact', ['compile', '--feature-zkir-v3', INTERFACE_SRC, V3_INTERFACE_OUT], { stdio: ['ignore', 'pipe', 'inherit'] });
+  }
+  const { deployCheck } = await import(pathToFileURL(join(REPO, 'src', 'deployer.mjs')).href);
+  const r = deployCheck({ interfaceSrc: INTERFACE_SRC, interfaceOut: V3_INTERFACE_OUT, fullOut: out, outDir: join(SITE_DIR, 'minocrab', 'erc20'), url: `${PAGES}/minocrab/erc20/index.json`, address: record.minocrab.address, indexerUrl: profile.indexer });
+  const payload = Buffer.from(r.payload);
+  record.minocrab.bundle = { url: r.url, commitment: hex(payload.subarray(0, 32)), payload: hex(payload), files: r.index.files.length, flags: r.compact?.flags ?? [] };
+  save();
+  log('minocrab.bundle', record.minocrab.bundle);
+}
+
+async function stepMinocrabPublish() {
+  const out = minocrabOut();
+  if (!record.minocrab?.bundle) throw new Error('run minocrab-bundle first');
+  if (record.minocrab.publish) { log('minocrab.published.already', record.minocrab.publish); return; }
+  await checkHosted(record.minocrab.bundle);
+  await withContract(async ({ providers, compiledContract }) => {
+    const contract = await findDeployedContract(providers, { compiledContract, contractAddress: record.minocrab.address, privateStateId: 'coc-erc20-minocrab' });
+    const started = Date.now();
+    const r = await contract.callTx.publishBundle(new Uint8Array(Buffer.from(record.minocrab.bundle.payload, 'hex')));
+    record.minocrab.publish = { ...txRecord(r.public), ms: Date.now() - started };
+    save();
+    log('minocrab.published', record.minocrab.publish);
+  }, { outDir: out });
+}
+
+// ---------------------------------------------------------------------------
+// 00022 placements P4 and P3: a registry map as the contract's last ledger field
+// (`reg-* last`, the default) or as its first (`reg-* first`)
+// ---------------------------------------------------------------------------
+const PAGES = 'https://compact-off-chain-circuits.pages.dev';
+const REGISTRIES = {
+  // P4: contracts/ERC20LiveRegistry.compact; the module's reads keep the tested keys.
+  last: {
+    recordKey: 'registry', side: 'last', site: 'registry', privateStateId: 'coc-erc20-registry',
+    out: join(HERE, 'contracts', 'managed', 'ERC20LiveRegistry'),
+    token: { name: 'Off-Chain Reads Registry Token', symbol: 'OCRR', decimals: 18n },
+    standards: {
+      erc20: { interfaceSrc: INTERFACE_SRC, interfaceOut: INTERFACE_OUT },
+      'erc20-metadata': { interfaceSrc: join(HERE, 'contracts', 'ERC20Metadata.Interface.compact'), interfaceOut: join(HERE, 'contracts', 'managed', 'ERC20Metadata') },
+    },
+  },
+  // P3: contracts/ERC20LiveRegistryFirst.compact; every read moves up one slot, so the
+  // interfaces import the registry first too.
+  first: {
+    recordKey: 'registryFirst', side: 'first', site: 'registry-first', privateStateId: 'coc-erc20-registry-first',
+    out: join(HERE, 'contracts', 'managed', 'ERC20LiveRegistryFirst'),
+    token: { name: 'Off-Chain Reads Registry-First Token', symbol: 'OCRS', decimals: 18n },
+    standards: {
+      erc20: { interfaceSrc: join(REPO, 'compact', 'examples', 'registry-first', 'Interface.compact'), interfaceOut: join(REPO, 'build', 'registry-first', 'interface') },
+      'erc20-metadata': { interfaceSrc: join(HERE, 'contracts', 'ERC20Metadata.RegistryFirst.Interface.compact'), interfaceOut: join(HERE, 'contracts', 'managed', 'ERC20MetadataRegistryFirst') },
+    },
+  },
+};
+const registryVariant = () => {
+  const v = process.argv[3] ?? 'last';
+  if (!REGISTRIES[v]) throw new Error(`registry variant must be first or last, got ${v}`);
+  return REGISTRIES[v];
+};
+const standardUrl = (cfg, standard) => `${PAGES}/${cfg.site}/${standard}/index.json`;
 const pad32 = (text) => { const b = new Uint8Array(32); b.set(Buffer.from(text, 'utf8').subarray(0, 32)); return b; };
 
 async function stepRegContract() {
-  record.registry ??= {};
-  if (record.registry.address) { log('reg.already', { address: record.registry.address }); return; }
+  const cfg = registryVariant();
+  const reg = (record[cfg.recordKey] ??= {});
+  if (reg.address) { log('reg.already', { address: reg.address }); return; }
   const rt = await import('@midnight-ntwrk/compact-runtime');
   await withContract(async ({ providers, compiledContract, publisherSecret }) => {
     const publisherCommitment = rt.persistentHash(new rt.CompactTypeVector(2, new rt.CompactTypeBytes(32)), [pad32('coc:publisher:'), publisherSecret]);
@@ -494,71 +589,71 @@ async function stepRegContract() {
     const started = Date.now();
     const contract = await deployContract(providers, {
       compiledContract,
-      args: [REG_TOKEN.name, REG_TOKEN.symbol, REG_TOKEN.decimals, holder, SUPPLY, publisherCommitment],
-      privateStateId: 'coc-erc20-registry',
+      args: [cfg.token.name, cfg.token.symbol, cfg.token.decimals, holder, SUPPLY, publisherCommitment],
+      privateStateId: cfg.privateStateId,
       initialPrivateState: {},
     });
     const p = contract.deployTxData.public;
-    record.registry = { address: p.contractAddress, token: { ...REG_TOKEN, decimals: Number(REG_TOKEN.decimals) }, publisherCommitment: hex(publisherCommitment), deploy: txRecord(p), bundles: {}, published: {} };
+    record[cfg.recordKey] = { address: p.contractAddress, token: { ...cfg.token, decimals: Number(cfg.token.decimals) }, publisherCommitment: hex(publisherCommitment), deploy: txRecord(p), bundles: {}, published: {} };
     save();
     log('reg.deployed', { address: p.contractAddress, txHash: p.txHash, blockHeight: Number(p.blockHeight), ms: Date.now() - started });
-  }, { outDir: REG_OUT, witnesses: { publisherSecret: true } });
+  }, { outDir: cfg.out, witnesses: { publisherSecret: true } });
 }
 
 async function stepRegBundles() {
-  if (!record.registry?.address) throw new Error('run reg-contract first');
+  const cfg = registryVariant();
+  const reg = record[cfg.recordKey];
+  if (!reg?.address) throw new Error('run reg-contract first');
   const { deployCheck } = await import(pathToFileURL(join(REPO, 'src', 'deployer.mjs')).href);
-  for (const [standard, cfg] of Object.entries(REG_STANDARDS)) {
-    const r = deployCheck({ interfaceSrc: cfg.interfaceSrc, interfaceOut: cfg.interfaceOut, fullOut: REG_OUT, outDir: join(SITE_DIR, 'registry', standard), url: cfg.url, address: record.registry.address, indexerUrl: profile.indexer });
+  for (const [standard, s] of Object.entries(cfg.standards)) {
+    const outDir = join(SITE_DIR, cfg.site, standard);
+    const r = deployCheck({ interfaceSrc: s.interfaceSrc, interfaceOut: s.interfaceOut, fullOut: cfg.out, outDir, url: standardUrl(cfg, standard), address: reg.address, indexerUrl: profile.indexer });
     const payload = Buffer.from(r.payload);
-    record.registry.bundles[standard] = { url: r.url, commitment: hex(payload.subarray(0, 32)), files: JSON.parse(readFileSync(join(SITE_DIR, 'registry', standard, 'index.json'), 'utf8')).files.length };
+    reg.bundles[standard] = { url: r.url, commitment: hex(payload.subarray(0, 32)), files: JSON.parse(readFileSync(join(outDir, 'index.json'), 'utf8')).files.length };
     save();
-    log('reg.bundle', { standard, ...record.registry.bundles[standard] });
+    log('reg.bundle', { standard, ...reg.bundles[standard] });
   }
 }
 
 async function stepRegPublish() {
-  if (!record.registry?.bundles?.erc20) throw new Error('run reg-bundles first');
-  const { readIndex, materialize } = await import(pathToFileURL(join(REPO, 'src', 'fetch.mjs')).href);
-  const { commitment, encodePoint, indexEntries } = await import(pathToFileURL(join(REPO, 'src', 'hash.mjs')).href);
-  const todo = Object.entries(record.registry.bundles).filter(([standard]) => !record.registry.published[standard]);
+  const cfg = registryVariant();
+  const reg = record[cfg.recordKey];
+  if (!reg?.bundles?.erc20) throw new Error('run reg-bundles first');
+  const todo = Object.entries(reg.bundles).filter(([standard]) => !reg.published[standard]);
   for (const [standard, b] of todo) {
-    const { index } = await readIndex({ url: b.url });
-    const hosted = hex(encodePoint(commitment(indexEntries(index))));
-    if (hosted !== b.commitment) throw new Error(`${standard}: hosted index.json commits to ${hosted}, expected ${b.commitment}`);
-    const got = await materialize({ index, url: b.url });
-    rmSync(got.dir, { recursive: true, force: true });
-    log('reg.hosted.ok', { standard, files: index.files.length });
+    await checkHosted(b);
+    log('reg.hosted.ok', { standard });
   }
-  if (todo.length === 0) { log('reg.published.already', record.registry.published); return; }
+  if (todo.length === 0) { log('reg.published.already', reg.published); return; }
   await withContract(async ({ providers, compiledContract }) => {
-    const contract = await findDeployedContract(providers, { compiledContract, contractAddress: record.registry.address, privateStateId: 'coc-erc20-registry' });
+    const contract = await findDeployedContract(providers, { compiledContract, contractAddress: reg.address, privateStateId: cfg.privateStateId });
     for (const [standard, b] of todo) {
       const started = Date.now();
       const r = await contract.callTx.publishInterface(pad32(`iface/v1/${standard}`), new Uint8Array(Buffer.from(b.commitment, 'hex')), b.url);
-      record.registry.published[standard] = txRecord(r.public);
+      reg.published[standard] = txRecord(r.public);
       save();
       log('reg.published', { standard, txHash: r.public.txHash, blockHeight: Number(r.public.blockHeight), ms: Date.now() - started });
     }
-  }, { outDir: REG_OUT, witnesses: { publisherSecret: true } });
+  }, { outDir: cfg.out, witnesses: { publisherSecret: true } });
 }
 
 async function stepRegRead() {
+  const cfg = registryVariant();
   const rt = await import(pathToFileURL(join(REPO, 'node_modules', '@midnight-ntwrk', 'compact-runtime', 'dist', 'index.js')).href);
-  const res = await fetch(profile.indexer, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: 'query($a: HexEncoded!) { contractAction(address: $a) { state transaction { hash block { height } } } }', variables: { a: record.registry.address } }) });
+  const res = await fetch(profile.indexer, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: 'query($a: HexEncoded!) { contractAction(address: $a) { state transaction { hash block { height } } } }', variables: { a: record[cfg.recordKey].address } }) });
   const { data } = await res.json();
   const cs = rt.ContractState.deserialize(Buffer.from(data.contractAction.state, 'hex'));
-  let v = cs.data.state; while (v.type() === 'array') v = v.asArray().at(-1);   // last leaf
+  let v = cs.data.state; while (v.type() === 'array') v = cfg.side === 'first' ? v.asArray()[0] : v.asArray().at(-1);   // first or last leaf
   const map = v.type() === 'map' ? v.asMap() : null;
   const entries = (map?.keys() ?? []).map((k) => {
     const key = Buffer.alloc(32); Buffer.from(k.value[0] ?? new Uint8Array()).copy(key);
     const cell = map.get(k).asCell();
     return { key: key.toString('utf8').replace(/\0+$/, ''), atoms: cell.value.map((a) => Buffer.from(a).toString('hex')), alignment: JSON.stringify(cell.alignment).slice(0, 160) };
   });
-  log('reg.read', { block: data.contractAction.transaction.block.height, lastLeaf: v.type(), entries });
+  log('reg.read', { block: data.contractAction.transaction.block.height, leaf: cfg.side, type: v.type(), entries });
 }
 
-const steps = { 'reg-contract': stepRegContract, 'reg-bundles': stepRegBundles, 'reg-publish': stepRegPublish, 'reg-read': stepRegRead, contract: stepContract, circuits: stepCircuits, bundle: stepBundle, publish: stepPublish, 'iface-write': stepIfaceWrite, 'iface-read': stepIfaceRead, 'iface-compat': stepIfaceCompat, 'iface-freeze': stepIfaceFreeze, slot15: stepSlot15, 'event-retrofit': stepEventRetrofit };
+const steps = { 'reg-contract': stepRegContract, 'reg-bundles': stepRegBundles, 'reg-publish': stepRegPublish, 'reg-read': stepRegRead, contract: stepContract, circuits: stepCircuits, bundle: stepBundle, publish: stepPublish, 'iface-write': stepIfaceWrite, 'iface-read': stepIfaceRead, 'iface-compat': stepIfaceCompat, 'iface-freeze': stepIfaceFreeze, slot15: stepSlot15, 'event-retrofit': stepEventRetrofit, 'minocrab-contract': stepMinocrabContract, 'minocrab-bundle': stepMinocrabBundle, 'minocrab-publish': stepMinocrabPublish };
 const step = process.argv[2];
 if (!steps[step]) { console.error(`usage: deploy.mjs ${Object.keys(steps).join('|')}`); process.exit(2); }
 await steps[step]();

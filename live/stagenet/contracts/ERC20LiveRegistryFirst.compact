@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: Apache-2.0
+// Live demonstration of the start-of-ledger interface registry (placement P3).
+//
+// compact/registry/InterfaceRegistry is imported FIRST, so its map is ledger field 0,
+// the state's first leaf, and a reader can find it without knowing the layout. Every
+// token field moves up one position, so the reads get new keys, and their interfaces
+// import the registry first as well: compact/examples/registry-first/Interface.compact
+// and ERC20Metadata.RegistryFirst.Interface.compact. `publisher` comes last (field 8);
+// with nine fields the layout stays one flat array.
+//
+// Only the holder of the publisher secret may write the registry: the constructor
+// stores a hash of it and publishInterface checks it through a witness.
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+import "../../../compact/registry/InterfaceRegistry" prefix InterfaceRegistry_;   // FIRST: field 0
+import "../../../compact/integrations/openzeppelin/FungibleTokenReadable" prefix FungibleToken_;
+
+export { ContractAddress, Either, Maybe };
+
+witness publisherSecret(): Bytes<32>;
+
+export ledger publisher: Bytes<32>;
+
+constructor(
+  _name: Opaque<"string">,
+  _symbol: Opaque<"string">,
+  _decimals: Uint<8>,
+  holder: Either<Bytes<32>, ContractAddress>,
+  supply: Uint<128>,
+  publisherCommitment: Bytes<32>
+) {
+  FungibleToken_initialize(_name, _symbol, _decimals);
+  FungibleToken__mint(disclose(holder), disclose(supply));
+  publisher = disclose(publisherCommitment);
+}
+
+export circuit name(): Opaque<"string"> { return FungibleToken_name(); }
+export circuit symbol(): Opaque<"string"> { return FungibleToken_symbol(); }
+export circuit decimals(): Uint<8> { return FungibleToken_decimals(); }
+export circuit totalSupply(): Uint<128> { return FungibleToken_totalSupply(); }
+export circuit balanceOf(account: Either<Bytes<32>, ContractAddress>): Uint<128> { return FungibleToken_balanceOf(account); }
+export circuit allowance(owner: Either<Bytes<32>, ContractAddress>, spender: Either<Bytes<32>, ContractAddress>): Uint<128> {
+  return FungibleToken_allowance(owner, spender);
+}
+
+export circuit publishInterface(standard: Bytes<32>, commitment: Bytes<32>, url: Opaque<"string">): [] {
+  assert(persistentHash<Vector<2, Bytes<32>>>([pad(32, "coc:publisher:"), publisherSecret()]) == publisher,
+         "only the publisher can publish an interface");
+  return InterfaceRegistry_publishInterface(standard, commitment, url);
+}

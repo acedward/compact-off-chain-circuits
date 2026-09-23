@@ -55,7 +55,7 @@ The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagen
 
 ### Interfaces advertised in the contract state
 
-The ERC-20 contract and three more deployments show the other places a contract can advertise its interfaces, each with the standards `erc20` and `erc20-metadata`. [docs/PLACEMENTS.md](docs/PLACEMENTS.md) compares them.
+The ERC-20 contract and four more deployments show the other places a contract can advertise its interfaces, each with the standards `erc20` and `erc20-metadata`. [docs/PLACEMENTS.md](docs/PLACEMENTS.md) compares them.
 
 | Contract | Where the entries are |
 |---|---|
@@ -63,6 +63,7 @@ The ERC-20 contract and three more deployments show the other places a contract 
 | `2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115` | a registry map, the contract's last ledger field |
 | `84a104e1dbfab382ba9088211b4ed6fd0a5ca84460f0b7fc07d7f675a929c847` | the operations metadata; the maintenance authority was then handed to an empty committee, so the entries can no longer change |
 | `6bd2c5be43209ab14380a7f764d9c1823c23138cfb70f7bb0e8c6a06ab7bbd4a` | a registry map at index 15 of the state's root, written at deploy |
+| `721577875316525d6ef086e174d9bc3c8f0188f7fde73cd72a0bdbd310cf6ea7` | a registry map, the contract's first ledger field |
 
 ```sh
 node src/discover.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
@@ -71,7 +72,9 @@ node src/verify.mjs --standard erc20-metadata --indexer https://indexer.stagenet
   --address 2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115 --circuit symbol --level 3
 ```
 
-`discover` lists every entry with the place it came from. `verify --standard` takes the entry for one standard and runs the three levels; here it prints `symbol() = "OCRR"`. All nine entries verify to Level 3.
+`discover` lists every entry with the place it came from. `verify --standard` takes the entry for one standard and runs the three levels; here it prints `symbol() = "OCRR"`. All their entries verify to Level 3.
+
+A sixth deployment, `5d82194fac77216360bb4be5f3879007b46858877df6d9a2c7769d2e96ea0692`, is the ERC-20 example compiled with `--feature-zkir-v3`, whose `publishBundle` circuit comes from MinoCrab, a Rust library for Midnight circuits. It proves with a 1.77 MB key instead of compactc's 56.6 MB. Its bundle event verifies to Level 3 like the others; see [docs/PLACEMENTS.md](docs/PLACEMENTS.md#minocrab).
 
 ## How to use
 
@@ -220,7 +223,7 @@ node scripts/simulate-deploy.mjs nft                                      # writ
 node src/verify.mjs --bundle bundle/nft \
   --event-payload "$(cat sim/nft/event-payload.hex)" --state sim/nft/state.hex \
   --circuit tokenURI --args 1 --level 3
-npm test                          # 289 tests, about a minute and a half
+npm test                          # 296 tests, about a minute and a half
 ```
 
 The `verify` run prints two `L1 OK` lines, one for `index.json` and one for its 16 files, then five `L2 OK`, six `L3 OK` and `tokenURI(1) = "https://nft.example/meta/1.json"`. Use `fungible` instead of `nft` to read `name`, `symbol`, `decimals` and `totalSupply`, or `multi` to read `uri`. `--args 999` shows a failed assertion with exit status 3. Changing one byte of any bundle file fails Level 1 with exit status 1.
@@ -276,7 +279,7 @@ live/stagenet/                                the Stagenet deployments, their sc
 
 ## Compatibility
 
-Midnight 2.x, Ledger v9. Reading the event needs indexer 4.4.0 or later, whose contract-event API is marked beta. Key verification and execution need only the contract state. Tested with `compact` 0.34.0, `@midnight-ntwrk/compact-runtime` 0.19.0, `@noble/curves` 2.4.0 for the Zcash group hash, and OpenZeppelin compact-contracts v0.3.0-alpha.1. Key reproducibility was measured on this toolchain, so re-check it after upgrading.
+Midnight 2.x, Ledger v9. Reading the event needs indexer 4.4.0 or later, whose contract-event API is marked beta. Key verification and execution need only the contract state. Contracts compiled with `--feature-zkir-v3` work too: the bundle records the flag, and Level 3 passes it to the compiler. Tested with `compact` 0.34.0, `@midnight-ntwrk/compact-runtime` 0.19.0, `@noble/curves` 2.4.0 for the Zcash group hash, and OpenZeppelin compact-contracts v0.3.0-alpha.1. Key reproducibility was measured on this toolchain, so re-check it after upgrading.
 
 ## License
 

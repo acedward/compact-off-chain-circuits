@@ -118,6 +118,12 @@ export async function wrapperBinding(bundleDir) {
 // ---------------------------------------------------------------------------
 // Level 3 — the published source
 // ---------------------------------------------------------------------------
+/**
+ * Compiler flags a bundle may ask Level 3 to pass. The bundle comes from the party being
+ * checked, so anything else is refused rather than handed to the compiler.
+ */
+export const LEVEL3_FLAGS = new Set(['--feature-zkir-v3']);
+
 /** Recompile the published source and compare with everything shipped. */
 export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 'compact' } = {}) {
   let pkg;
@@ -128,6 +134,10 @@ export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 
   if (!pinned.interface || !existsSync(src)) {
     return { ok: false, rows: [], error: `bundle package.json does not point at a published source (compact.interface)` };
   }
+  const flags = pinned.flags ?? [];
+  if (!Array.isArray(flags) || flags.some((f) => !LEVEL3_FLAGS.has(f))) {
+    return { ok: false, rows: [], pinned, error: `bundle package.json asks for compiler flags this verifier does not pass: ${JSON.stringify(flags)}` };
+  }
   let installed = null;
   try { installed = execFileSync(compactBin, ['compile', '--version'], { encoding: 'utf8' }).trim(); }
   catch { return { ok: false, rows: [], pinned, error: `'${compactBin}' is not runnable; Level 3 needs the pinned compact toolchain installed` }; }
@@ -135,7 +145,7 @@ export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 
   const out = mkdtempSync(join(tmpdir(), 'coc-l3-'));
   try {
     try {
-      execFileSync(compactBin, ['compile', src, out], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      execFileSync(compactBin, ['compile', ...flags, src, out], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (e) {
       return { ok: false, rows: [], pinned, installed, error: `recompile failed: ${String(e.stderr || e.message).split('\n')[0]}` };
     }

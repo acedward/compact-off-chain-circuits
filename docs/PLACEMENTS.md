@@ -116,6 +116,8 @@ node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql 
 - Import it once. Each import of a module gets its own copy of the module's ledger, so a second import makes a second registry.
 - There is no access control. The header of the module shows the commented publisher check to put in the contract's wrapper.
 
+**On Stagenet.** `72157787…cf6ea7` (`live/stagenet/contracts/ERC20LiveRegistryFirst.compact`) imports the registry first and wraps `publishInterface` with the publisher check. Its six reads verify against `examples/registry-first/Interface.compact`, and its metadata reads against `live/stagenet/contracts/ERC20Metadata.RegistryFirst.Interface.compact`, which imports the registry first too. Two standards were published (blocks 587747 and 587750) and verify to Level 3 from path `[0]`.
+
 ## P4 — registry at the end of the ledger
 
 **Where it lives.** The contract declares the same map as its last ledger declaration, with the two setters. It imports the struct from `compact/registry/InterfaceTypes.compact`, which has no ledger fields; declaring the struct inline produces the same key and the same state encoding. Contract fields follow every imported module's fields, so the map is the last field, and the last field is always the state's last leaf. Template: `compact/templates/RegistryAtEnd.template.compact`. Example: `compact/examples/registry-last/`. The live Stagenet registry contract `2f4f7e6f…877f115` has this shape, with nine fields.
@@ -220,7 +222,11 @@ MinoCrab is a Rust library for writing Midnight circuits; it emits ZKIR v3 and u
 - The exception is `publishBundle`. MinoCrab proves the same statement, with the same public inputs, much more cheaply: a 1.77 MB prover key at k = 11, against 56.6 MB (k = 16) for compactc with ZKIR v3 and 67.4 MB (k = 18) with the default ZKIR v2.
 - It can pin a map to an explicit path such as `[15]` (P5), with circuits that read and write it there. Those circuits then have the same keys in every contract.
 - Its executor runs a circuit against a contract state with Midnight's ledger VM and no proof. Run against the live registry's state, it returned both entries.
-- It has no deploy or call tooling. A MinoCrab circuit reaches a network through a compactc `--feature-zkir-v3` build deployed with midnight-js, with MinoCrab's key and ZKIR swapped in and `compiler/contract-manifest.json` rewritten to match. A contract compiled with the default ZKIR v2, like every contract above, cannot use MinoCrab keys.
+- It has no deploy or call tooling. A MinoCrab circuit reaches a network through a compactc `--feature-zkir-v3` build deployed with midnight-js, with MinoCrab's key and ZKIR swapped in and `compiler/contract-manifest.json` rewritten to match. A contract compiled with the default ZKIR v2 cannot use MinoCrab keys.
+
+**On Stagenet.** `5d82194f…ea0692` is `live/stagenet/contracts/ERC20Live.compact` compiled with `--feature-zkir-v3`, with MinoCrab's `publishBundle` in place of compactc's (`deploy.mjs minocrab-*`). The chain holds MinoCrab's key for `publishBundle` (`813b25cc…`) and compactc's v3 keys for the six reads. midnight-js deployed it (block 587808) and proved and submitted `publishBundle` with MinoCrab's 1.77 MB key (block 587848, `SucceedEntirely`). Proving it took about 0.3 s on the proof server, against about 7 s with compactc's 56.6 MB v3 key (measured offline). The bundle ships the v3 keys and records `--feature-zkir-v3` in its `package.json`, so Level 3 recompiles with that flag; it verifies to Level 3. The proof-server image is the stock `midnightntwrk/proof-server:9.0.0-rc.6`.
+
+The JavaScript `Transaction.wellFormed` in the npm `@midnightntwrk/ledger-v9` checks no contract proofs: its WASM is built without the ledger's `proof-verifying` feature, so a proof made with the wrong key passes it. The MinoCrab proof was checked offline with a Rust build of the ledger that verifies proofs (accepted, and a proof made with the wrong key rejected), and on chain by the node.
 
 ## Evidence on Stagenet
 
@@ -229,7 +235,7 @@ Two Stagenet states are stored under `test/fixtures/` and decoded by `test/opera
 - `stagenet-294c2b6a-state.hex`, the 00021 ERC-20 contract at block 582774: one P2 entry, `iface/v1/erc20`, with commitment `cebd25ff…335eb1` and URL `https://compact-off-chain-circuits.pages.dev/erc20/index.json`.
 - `stagenet-2f4f7e6f-registry-state.hex`, the P4 registry contract at block 587203: `erc20`, with commitment `1149cc06…2acf43`, and `erc20-metadata`, with commitment `c53c75fa…5c03b1`, both in its last field at path `[8]`.
 
-Four contracts on Stagenet carry entries. Each can be checked with `discover` and `verify --standard`, and every transaction is recorded in `live/stagenet/deployment.json`.
+Six contracts on Stagenet carry entries. Each can be checked with `discover` and `verify --standard`, and every transaction is recorded in `live/stagenet/deployment.json`.
 
 | Contract | Placements | Shown | Transactions (block) |
 |---|---|---|---|
@@ -237,8 +243,10 @@ Four contracts on Stagenet carry entries. Each can be checked with `discover` an
 | `2f4f7e6f…877f115` | P4 | two standards written through `publishInterface`, with the publisher check enforced | `a1470246…` (582857), `c3fb2b0f…` (587200), `33f7f886…` (587203) |
 | `84a104e1…929c847` | P2 | two standards in one update; an update and a freeze in the next; a later write rejected | `096378aa…` (587366), `671f9b39…` (587369), `65070cb3…` (587372) |
 | `6bd2c5be…7bbd4a` | P5 | a 16-entry root at deploy; an ordinary proven call afterwards | `a163f963…` (587459), `240491b7…` (587463) |
+| `72157787…cf6ea7` | P3 | two standards written through `publishInterface`, with the publisher check enforced | `5fc8b617…` (587702), `dc10d4ff…` (587747), `0c6e5764…` (587750) |
+| `5d82194f…ea0692` | P0 | ZKIR v3 keys; `publishBundle` proven with MinoCrab's key (see [MinoCrab](#minocrab)) | `649a5ac2…` (587808), `346080df…` (587848) |
 
-All nine entries verify to Level 3 from the public indexer. A bundle does not depend on the contract's address, so the two hosted for `2f4f7e6f` serve `84a104e1` and `6bd2c5be` unchanged. On 22 unrelated Stagenet contracts, four of which have a map as their first field, discovery reports nothing.
+All twelve entries verify to Level 3 from the public indexer. A bundle does not depend on the contract's address, so the two hosted for `2f4f7e6f` serve `84a104e1` and `6bd2c5be` unchanged. On 22 unrelated Stagenet contracts, four of which have a map as their first field, discovery reports nothing.
 
 ## Prior art
 

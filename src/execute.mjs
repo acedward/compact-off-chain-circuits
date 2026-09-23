@@ -59,28 +59,36 @@ function bytesArg(length, raw, label) {
 }
 
 /**
- * The largest value of a `Uint` type as contract-info.json describes it. The
- * file writes bounds above 2^53 as floating point numbers (2^128 − 1 becomes
- * 3.402823669209385e+38, which is 2^128): such a power of two is read as the
- * bound 2^n − 1 of `Uint<n>`. Any other large bound is approximate, and the
- * wrapper's own type check has the last word on it.
+ * The largest value of a `Uint` type, exactly, or undefined. contract-info.json
+ * gives it as `maxval` in exact decimal digits (compactc writes `Uint<n>` as
+ * 2^n − 1 and `Uint<0..m>` as m − 1), and `bundleInfo` reads them exactly, as a
+ * BigInt where a double cannot hold them. A `maxval` that is not an exact
+ * non-negative integer (a double in a hand-written file, say) is no bound:
+ * nothing is checked here, and the wrapper's own type check decides, which
+ * `executeCircuit` reports as an argument error too.
  */
 function uintMax(type) {
-  const m = type.maxval;
+  const m = type?.maxval;
+  if (typeof m === 'bigint') return m >= 0n ? m : undefined;
+  if (Number.isSafeInteger(m)) return m >= 0 ? BigInt(m) : undefined;
   if (typeof m === 'string' && /^[0-9]+$/.test(m)) return BigInt(m);
-  if (Number.isSafeInteger(m) && m >= 0) return BigInt(m);
-  if (typeof m === 'number' && Number.isFinite(m) && m > 0) {
-    const bits = Math.round(Math.log2(m));
-    return 2 ** bits === m ? (1n << BigInt(bits)) - 1n : BigInt(Math.floor(m));
-  }
   return undefined;
 }
 
-/** The Compact spelling of an unsigned bound: `Uint<8>` for 255, `Uint<0..100>` otherwise. */
+/** The Compact spelling of the unsigned type whose largest value is `max`: `Uint<8>` for 255, `Uint<0..100>` for 99. */
 const uintName = (max) => {
   const bits = (max + 1n).toString(2).length - 1;
-  return (1n << BigInt(bits)) === max + 1n ? `Uint<${bits}>` : `Uint<0..${max}>`;
+  return (1n << BigInt(bits)) === max + 1n ? `Uint<${bits}>` : `Uint<0..${max + 1n}>`;
 };
+
+/** A contract-info `Uint` type as Compact spells it (`Uint<128>`, `Uint<0..100>`), or `Uint` when it has no exact bound. */
+export function uintTypeName(type) {
+  const max = uintMax(type);
+  return max === undefined ? 'Uint' : uintName(max);
+}
+
+/** A contract-info type for an error message; its bounds may be BigInts, which JSON.stringify refuses. */
+const typeText = (type) => JSON.stringify(type, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
 
 /** A decimal integer from 0 to `max`, nothing else (no sign, spaces, exponent or 0x). */
 function integerArg(max, name, raw, label) {
@@ -102,7 +110,7 @@ export function zeroOf(type) {
     case 'Opaque': return type.tsType === 'Uint8Array' ? new Uint8Array(0) : '';
     case 'Vector': return Array.from({ length: type.length }, () => zeroOf(type.type));
     case 'Struct': return Object.fromEntries((type.elements ?? []).map((e) => [e.name, zeroOf(e.type)]));
-    default: throw new Error(`no default value for type ${JSON.stringify(type)}`);
+    default: throw new Error(`no default value for type ${typeText(type)}`);
   }
 }
 
@@ -111,7 +119,8 @@ export function zeroOf(type) {
  * value that does not fit is an ArgumentError, never cut, padded or guessed.
  *
  *   Bytes<N>        exactly 2N hex digits, with an optional 0x
- *   Uint, Field     a decimal integer within the type's range
+ *   Uint, Field     a decimal integer within the type's range (a Uint whose
+ *                   bound is not an exact integer: any, and the wrapper decides)
  *   Boolean         true/false, 1/0, yes/no
  *   Either<L, R>    key:<L> or left:<L>, addr:<R> or address:<R> or right:<R>;
  *                   a bare value is the left arm. A struct arm with a single
@@ -157,7 +166,7 @@ export function coerceArg(type, raw, label = 'argument') {
     // Last resort: the caller spells the struct out as JSON.
     try { return JSON.parse(raw); } catch { throw new ArgumentError(`${label}: ${type.name ?? 'struct'} takes its fields as JSON; got ${shown(raw)}`); }
   }
-  throw new Error(`${label}: no argument parser for type ${JSON.stringify(type)}`);
+  throw new Error(`${label}: no argument parser for type ${typeText(type)}`);
 }
 
 /** Turn a wrapper return value into something printable, without losing information. */
@@ -186,9 +195,76 @@ export function describeResult(value) {
   return String(value);
 }
 
-/** Read a bundle's `out/compiler/contract-info.json`. */
+const NUMBER = /-?(?:0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/y;
+
+/**
+ * JSON.parse, except that an integer a double cannot hold exactly comes back as
+ * a BigInt with the value its digits spell. compactc writes a `Uint` bound in
+ * contract-info.json as exact decimal digits (`Uint<128>` as
+ * 340282366920938463463374607431768211455), which JSON.parse rounds to the
+ * nearest double. The digits are read from the text here, so this does not rely
+ * on the source text JSON.parse hands a reviver, which Node 20 (the oldest
+ * version the package supports) does not have. Everything else comes out as
+ * JSON.parse gives it, "__proto__" and repeated keys included. The text is
+ * given to JSON.parse first, so malformed text fails with JSON.parse's error.
+ */
+export function parseJsonExact(text) {
+  JSON.parse(text);
+  // From here on the text is known to be valid JSON.
+  let i = 0;
+  const space = () => { while (text[i] === ' ' || text[i] === '\t' || text[i] === '\n' || text[i] === '\r') i++; };
+  const string = () => {
+    const start = i++;
+    while (text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+    i++;
+    return JSON.parse(text.slice(start, i));
+  };
+  const value = () => {
+    space();
+    const c = text[i];
+    if (c === '{') {
+      i++;
+      const object = {};
+      space();
+      if (text[i] === '}') { i++; return object; }
+      for (;;) {
+        space();
+        const key = string();
+        space();
+        i++;   // ':'
+        // An own property even for "__proto__", as JSON.parse makes it.
+        Object.defineProperty(object, key, { value: value(), writable: true, enumerable: true, configurable: true });
+        space();
+        if (text[i++] === '}') return object;   // else ','
+      }
+    }
+    if (c === '[') {
+      i++;
+      const array = [];
+      space();
+      if (text[i] === ']') { i++; return array; }
+      for (;;) {
+        array.push(value());
+        space();
+        if (text[i++] === ']') return array;   // else ','
+      }
+    }
+    if (c === '"') return string();
+    if (text.startsWith('true', i)) { i += 4; return true; }
+    if (text.startsWith('false', i)) { i += 5; return false; }
+    if (text.startsWith('null', i)) { i += 4; return null; }
+    NUMBER.lastIndex = i;
+    const [digits, fraction, exponent] = NUMBER.exec(text);
+    i = NUMBER.lastIndex;
+    const n = Number(digits);
+    return fraction === undefined && exponent === undefined && !Number.isSafeInteger(n) ? BigInt(digits) : n;
+  };
+  return value();
+}
+
+/** Read a bundle's `out/compiler/contract-info.json`, its integers exact (`parseJsonExact`). */
 export const bundleInfo = (bundleDir) =>
-  JSON.parse(readFileSync(join(bundleDir, 'out', 'compiler', 'contract-info.json'), 'utf8'));
+  parseJsonExact(readFileSync(join(bundleDir, 'out', 'compiler', 'contract-info.json'), 'utf8'));
 
 /**
  * Everything about a call that can be checked without running bundle code, from
@@ -267,11 +343,26 @@ export async function executeCircuit({ bundleDir, stateBytes, circuitName, args 
     const { result } = await contract.circuits[circuitName](context, ...coerced);
     return { value: result, text: describeResult(result) };
   } catch (e) {
+    const message = String(e?.message ?? e).split('\n')[0];
+    // The wrapper's own check of an argument's type refused it: the arguments
+    // do not fit, the caller's mistake, as when `coerceArg` refuses them. Reached
+    // when contract-info.json gives a bound that is not an exact integer, or for
+    // a struct given as JSON.
+    if (WRAPPER_ARGUMENT_TYPE_ERROR.test(message)) throw new ArgumentError(message);
     // The runtime surfaces a failed `assert` as an exception; that is a real
     // answer from the circuit, not a tooling failure.
-    throw new CircuitAssertionError(String(e?.message ?? e).split('\n')[0]);
+    throw new CircuitAssertionError(message);
   }
 }
+
+/**
+ * What the generated wrapper throws when an argument is not of the circuit's
+ * type (compact-runtime `typeError`), for example `type error: wide argument 1
+ * (argument 2 as invoked from Typescript) at Ranged.compact line 9 char 1;
+ * expected value of type Uint<0..1152921504606847232> but received …`.
+ * Argument 1 as invoked from TypeScript is the context, which this tool builds.
+ */
+const WRAPPER_ARGUMENT_TYPE_ERROR = /^type error: \S+ argument \d+ \(argument \d+ as invoked from Typescript\) at /;
 
 /** The child's entry point: src/execute-child.mjs, next to this file. */
 export const CHILD = fileURLToPath(new URL('./execute-child.mjs', import.meta.url));

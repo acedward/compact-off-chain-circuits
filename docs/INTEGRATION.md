@@ -194,15 +194,21 @@ What they get:
   passed ties its circuit to the chain. The circuit's code is not tied: at
   Level 2 the executed wrapper is the entry writer's code, whoever wrote the
   entry the consumer followed. No compiler needed.
-* **Level 3** (`--level 3`, needs the pinned `compact` toolchain) — recompiling
-  the published source, a file the index lists, reproduces exactly the shipped
-  keys, `index.js` and `contract-info.json` byte for byte,
-  which binds the source, the generated wrapper and the circuit signatures to
-  the deployed circuit and removes you from the trust chain. The compile runs
+* **Level 3** (`--level 3`, needs the `compact` toolchain, compactc 0.30.0 or
+  later) — recompiling the published source, a file the index lists, with your
+  installed compiler reproduces exactly the shipped keys, `index.js` and
+  `contract-info.json` byte for byte, which binds the source, the generated
+  wrapper and the circuit signatures to the deployed circuit and removes you
+  from the trust chain. The compiler version in the bundle's `package.json` is
+  advisory: `verify` does not select it, and when your installed version
+  differs it warns that this is the likely cause of a mismatch. The compile runs
   without `COMPACT_PATH` and may read only files inside the bundle that the
   index lists: an import or include that the compiler finds anywhere else fails
   Level 3. The verifier checks this with the compiler's own `--trace-search`
-  output, which compactc prints from 0.30.0 on.
+  output, which compactc prints from 0.30.0 on. When a listed source imports or
+  includes a file by name and the compiler printed no trace line in that form,
+  Level 3 fails too ("the compiler's search trace was not recognised"), because
+  the files it read cannot be checked.
 
 The tool prints the level it reached, and for indexer input the block height and
 transaction hash of the state it read. Its exit status is 0 when everything
@@ -218,11 +224,13 @@ code, but no level verifies it.
 
 Arguments are strict, so that a typo cannot turn into a different, valid
 argument. A `Bytes<N>` argument takes exactly 2N hex digits, with an optional
-`0x`; `Uint` and `Field` take a decimal integer within the type's range; an
+`0x`; `Uint` and `Field` take a decimal integer within the type's range, which
+is read exactly from `contract-info.json`, bounds above 2^53 included; an
 `Either` takes `key:<hex>` for the left arm or `addr:<hex>` for the right arm.
 Nothing is cut or zero-padded, and text is not accepted for `Bytes<N>`. Any
 other value is an input error (exit 2), reported after the checks, and the
-circuit does not run.
+circuit does not run. So is a value the generated wrapper's own type check
+refuses.
 
 Level 2 also compares the shipped keys with the `expectedVk` table the compiler
 embeds in `index.js`, which catches a bundle assembled from artifacts of two

@@ -31,6 +31,9 @@
 // Level 3 compiles with COMPACT_PATH removed from the compiler's environment,
 // and refuses the bundle when the compiler reads any file that is outside
 // Level 1's private copy or not listed in index.json (compactc --trace-search).
+// When a listed source imports or includes a file by name, it also refuses a
+// compile that printed no trace line it recognises. It uses the installed
+// compiler; a version other than the one package.json pins is only reported.
 //
 // By default the commitment and URL come from the latest `bundle/v1` event.
 // With `--standard <name>` they come from discovery instead (src/registry.mjs):
@@ -49,7 +52,7 @@ import { Budget, BundleError, MAX_BUNDLE_BYTES, materialize, readIndex } from '.
 import { fetchLatestBundleEvent, fetchMiscEvents, fetchState } from './indexer.mjs';
 import { asciiJson, ifaceName, inspectState, printable, selectEntry } from './registry.mjs';
 import { readStateArg } from './discover.mjs';
-import { ArgumentError, CircuitAssertionError, bundleInfo, executeInChild } from './execute.mjs';
+import { ArgumentError, CircuitAssertionError, bundleInfo, executeInChild, uintTypeName } from './execute.mjs';
 
 const sha256hex = (buf) => createHash('sha256').update(buf).digest('hex');
 /** Names of the `<name>.verifier` entries in a keys directory, sorted, whatever kind of entry they are. */
@@ -255,6 +258,86 @@ export function searchTraceProblem(stderr, { root, listed, realpath = realpathSy
   return null;
 }
 
+/** An identifier as compactc's lexer reads one: a Unicode letter, `_` or `$`, then also marks, digits and connectors. */
+const IDENTIFIER = /[\p{L}\p{Nl}_$][\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}_$]*/uy;
+const NUMERAL = /[0-9][0-9A-Za-z_.]*/y;
+
+/**
+ * The file named by the first quoted `import` or `include` in a Compact source,
+ * or null. That is a string whose previous word is `import`, `include` or
+ * `from` (as in `import { a } from "file"`). All three are reserved words, so a
+ * valid source has them before a string nowhere else. The source is read the
+ * way compactc's lexer reads it: `//` and `/* *\/` comments, and `"…"` and
+ * `'…'` strings with backslash escapes, which may span lines. So a directive
+ * counts wherever it stands (after other code on its line, with a comment
+ * before its file name), and one inside a comment or a string does not.
+ * Punctuation between the word and the string is skipped, which can only make
+ * the result stricter. Unquoted imports do not count: `import
+ * CompactStandardLibrary;` names a built-in module, and any other name can
+ * only be a file next to the importing one, which Level 3's check covers.
+ */
+export function quotedDirective(text) {
+  const s = String(text);
+  let word = null;
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '/' && s[i + 1] === '/') { const end = s.indexOf('\n', i); i = end < 0 ? s.length : end; continue; }
+    if (c === '/' && s[i + 1] === '*') { const end = s.indexOf('*/', i + 2); i = end < 0 ? s.length : end + 2; continue; }
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < s.length && s[j] !== c) j += s[j] === '\\' ? 2 : 1;
+      if (word === 'import' || word === 'include' || word === 'from') return s.slice(i + 1, j);
+      word = null;
+      i = j + 1;
+      continue;
+    }
+    IDENTIFIER.lastIndex = i;
+    const id = IDENTIFIER.exec(s);
+    if (id) { word = id[0]; i = IDENTIFIER.lastIndex; continue; }
+    NUMERAL.lastIndex = i;
+    const numeral = NUMERAL.exec(s);
+    if (numeral) { word = numeral[0]; i = NUMERAL.lastIndex; continue; }
+    i++;   // whitespace or punctuation: the previous word stands
+  }
+  return null;
+}
+
+/**
+ * The first listed `.compact` file inside `root` that has a quoted import or
+ * include, as `{ file, spec }`, or null. A file that cannot be read counts, with
+ * `spec` null: it cannot be ruled out.
+ */
+function listedDirective(root, listed) {
+  for (const file of listed ?? []) {
+    if (typeof file !== 'string' || !file.endsWith('.compact') || !resolve(root, file).startsWith(root + sep)) continue;
+    const read = readRegular(root, file);
+    if (read.error) return { file, spec: null };
+    const spec = quotedDirective(read.bytes.toString('utf8'));
+    if (spec !== null) return { file, spec };
+  }
+  return null;
+}
+
+/**
+ * The positive control on the search trace: when a listed source imports or
+ * includes a file by name, the compiler looked for at least one file, so at
+ * least one line of `stderr` must be a trace line in the form
+ * `searchTraceProblem` reads. Without one, this compiler reports its lookups in
+ * some other way or not at all, and the confinement check saw nothing. Returns
+ * the problem, or null.
+ */
+function traceControlProblem(stderr, root, listed) {
+  if (String(stderr).split('\n').some((line) => TRACE_LINE.test(line))) return null;
+  const directive = listedDirective(root, listed);
+  if (!directive) return null;
+  const spec = directive.spec?.length > 120 ? `${directive.spec.slice(0, 117)}...` : directive.spec;
+  const what = spec === null
+    ? `${JSON.stringify(directive.file)} could not be read to rule out an import`
+    : `${JSON.stringify(directive.file)} imports or includes ${JSON.stringify(spec)}`;
+  return `the compiler's search trace was not recognised: ${what}, but the compiler printed no "looking for <file>...found" line on stderr, so the files it read cannot be checked (compactc 0.30.0 to 0.34.0 print one line per lookup)`;
+}
+
 /**
  * Recompile the published source and compare with everything shipped: every
  * shipped key, index.js and contract-info.json must be reproduced, and the
@@ -262,9 +345,10 @@ export function searchTraceProblem(stderr, { root, listed, realpath = realpathSy
  * (`compact.interface`) must be a file inside the bundle that index.json lists;
  * that and the flags are checked before the compiler is run at all. The compile
  * runs without COMPACT_PATH, with --trace-search, and fails when the compiler
- * read any file outside the bundle or not listed in index.json. `listed` is the
- * list of paths Level 1 checked; without it, the bundle directory's own
- * index.json is read.
+ * read any file outside the bundle or not listed in index.json, and when a
+ * listed source imports or includes a file by name but the compiler printed no
+ * trace line in the form read here. `listed` is the list of paths Level 1
+ * checked; without it, the bundle directory's own index.json is read.
  */
 export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 'compact', listed } = {}) {
   let pkg;
@@ -297,7 +381,7 @@ export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 
   delete env.COMPACT_PATH;
   let installed = null;
   try { installed = execFileSync(compactBin, ['compile', '--version'], { encoding: 'utf8', env }).trim(); }
-  catch { return { ok: false, rows: [], pinned, error: `'${compactBin}' is not runnable; Level 3 needs the pinned compact toolchain installed` }; }
+  catch { return { ok: false, rows: [], pinned, error: `'${compactBin}' is not runnable; Level 3 needs the compact toolchain installed (compactc 0.30.0 or later)` }; }
 
   const out = mkdtempSync(join(tmpdir(), 'coc-l3-'));
   try {
@@ -312,6 +396,8 @@ export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 
       const first = stderr.split('\n').find((l) => l.trim() !== '' && !TRACE_LINE.test(l));
       return { ok: false, rows: [], pinned, installed, error: `recompile failed: ${first ?? run.error?.message ?? `exit status ${run.status}`}` };
     }
+    const unrecognised = traceControlProblem(stderr, root, paths);
+    if (unrecognised) return { ok: false, rows: [], pinned, installed, error: unrecognised };
     const rows = [];
     const shipped = keyNames(bundleDir);
     for (const name of shipped) {
@@ -483,7 +569,8 @@ const USAGE = `coc-verify — execute a published contract read circuit and chec
   --args <...>            arguments for it, one CLI token each: Bytes<N> as exactly
                           2N hex digits (0x optional), Uint and Field in decimal,
                           Either as key:<hex> or addr:<hex>, Maybe as none or some:<v>
-  --level <2|3>           highest level to attempt (default 2; 3 needs the pinned compiler).
+  --level <2|3>           highest level to attempt (default 2; 3 recompiles the source with
+                          the installed compiler, compactc 0.30.0 or later).
                           Level 1 always runs with Level 2; a circuit runs only
                           if its verifier key passed Level 2
   --json                  machine-readable output
@@ -715,7 +802,7 @@ export function renderType(t) {
   if (!t) return '[]';
   switch (t['type-name']) {
     case 'Bytes': return `Bytes<${t.length}>`;
-    case 'Uint': return `Uint<${Math.round(Math.log2(Number(t.maxval) + 1))}>`;
+    case 'Uint': return uintTypeName(t);
     case 'Opaque': return `Opaque<"${t.tsType}">`;
     case 'Struct':
       if (!t.name) return 'Struct';

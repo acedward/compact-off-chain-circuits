@@ -17,7 +17,7 @@
 // scripts/deploy-and-publish.ts, which deployed to Stagenet with the same toolchain.
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
@@ -70,18 +70,22 @@ const txRecord = (p) => ({ txId: p.txId, txHash: p.txHash, blockHeight: Number(p
  * uses here. A copy under this folder resolves this folder's runtime instead.
  */
 async function loadContractModule(outDir) {
-  const dir = join(HERE, '.contract', outDir === LIVE_OUT ? 'live' : 'full');
+  const dir = join(HERE, '.contract', basename(outDir));
   mkdirSync(dir, { recursive: true });
   copyFileSync(join(outDir, 'contract', 'index.js'), join(dir, 'index.js'));
   writeFileSync(join(dir, 'package.json'), '{ "type": "module" }\n');
   return import(pathToFileURL(join(dir, 'index.js')).href);
 }
 
-async function withContract(fn, { outDir = LIVE_OUT } = {}) {
+const publisherSecretOf = (seed) => createHash('sha256').update(seed).update('coc:publisher-secret').digest();
+
+async function withContract(fn, { outDir = LIVE_OUT, witnesses = {} } = {}) {
   setNetworkId(profile.networkId);
   const mnemonic = (process.env.STAGENET_WALLET_MNEMONIC ?? '').trim().split(/\s+/).join(' ');
   if (!validateMnemonic(mnemonic, wordlist)) throw new Error('STAGENET_WALLET_MNEMONIC is missing or not a valid BIP-39 mnemonic');
-  const seedHex = hex(mnemonicToSeedSync(mnemonic));
+  const seed = mnemonicToSeedSync(mnemonic);
+  const seedHex = hex(seed);
+  const publisherSecret = new Uint8Array(publisherSecretOf(seed));
   const { NetworkId } = await import('@midnightntwrk/wallet-sdk');
   const environment = { ...profile, walletNetworkId: NetworkId.NetworkId.StageNet };
 
@@ -98,6 +102,7 @@ async function withContract(fn, { outDir = LIVE_OUT } = {}) {
       // Only transfers and approvals read this OpenZeppelin account key; none are called here.
       CompiledContract.withWitnesses({
         wit_FungibleTokenSK: () => { throw new Error('wit_FungibleTokenSK is not available to the deployment script'); },
+        ...(witnesses.publisherSecret ? { publisherSecret: ({ privateState }) => [privateState, publisherSecret] } : {}),
       }),
       CompiledContract.withCompiledFileAssets(outDir),
     );
@@ -105,7 +110,7 @@ async function withContract(fn, { outDir = LIVE_OUT } = {}) {
       privateStateStoreName: 'coc-00021-erc20',
       zkConfigPath: outDir,
     });
-    return await fn({ providers, compiledContract });
+    return await fn({ providers, compiledContract, publisherSecret });
   } finally {
     await walletProvider.stop?.();
   }
@@ -241,7 +246,94 @@ async function stepIfaceRead() {
   log('iface.read', { block: data.contractAction.transaction.block.height, operations: cs.operations().length, found });
 }
 
-const steps = { contract: stepContract, circuits: stepCircuits, bundle: stepBundle, publish: stepPublish, 'iface-write': stepIfaceWrite, 'iface-read': stepIfaceRead };
+// ---------------------------------------------------------------------------
+// 00022 placement P4: registry map declared as the contract's last ledger field
+// ---------------------------------------------------------------------------
+const REG_OUT = join(HERE, 'contracts', 'managed', 'ERC20LiveRegistry');
+const META_SRC = join(HERE, 'contracts', 'ERC20Metadata.Interface.compact');
+const META_OUT = join(HERE, 'contracts', 'managed', 'ERC20Metadata');
+const REG_TOKEN = { name: 'Off-Chain Reads Registry Token', symbol: 'OCRR', decimals: 18n };
+const REG_STANDARDS = {
+  erc20: { interfaceSrc: INTERFACE_SRC, interfaceOut: INTERFACE_OUT, url: 'https://compact-off-chain-circuits.pages.dev/registry/erc20/index.json' },
+  'erc20-metadata': { interfaceSrc: META_SRC, interfaceOut: META_OUT, url: 'https://compact-off-chain-circuits.pages.dev/registry/erc20-metadata/index.json' },
+};
+const pad32 = (text) => { const b = new Uint8Array(32); b.set(Buffer.from(text, 'utf8').subarray(0, 32)); return b; };
+
+async function stepRegContract() {
+  record.registry ??= {};
+  if (record.registry.address) { log('reg.already', { address: record.registry.address }); return; }
+  const rt = await import('@midnight-ntwrk/compact-runtime');
+  await withContract(async ({ providers, compiledContract, publisherSecret }) => {
+    const publisherCommitment = rt.persistentHash(new rt.CompactTypeVector(2, new rt.CompactTypeBytes(32)), [pad32('coc:publisher:'), publisherSecret]);
+    const holder = { is_left: true, left: new Uint8Array(DEMO_HOLDER), right: { bytes: new Uint8Array(32) } };
+    const started = Date.now();
+    const contract = await deployContract(providers, {
+      compiledContract,
+      args: [REG_TOKEN.name, REG_TOKEN.symbol, REG_TOKEN.decimals, holder, SUPPLY, publisherCommitment],
+      privateStateId: 'coc-erc20-registry',
+      initialPrivateState: {},
+    });
+    const p = contract.deployTxData.public;
+    record.registry = { address: p.contractAddress, token: { ...REG_TOKEN, decimals: Number(REG_TOKEN.decimals) }, publisherCommitment: hex(publisherCommitment), deploy: txRecord(p), bundles: {}, published: {} };
+    save();
+    log('reg.deployed', { address: p.contractAddress, txHash: p.txHash, blockHeight: Number(p.blockHeight), ms: Date.now() - started });
+  }, { outDir: REG_OUT, witnesses: { publisherSecret: true } });
+}
+
+async function stepRegBundles() {
+  if (!record.registry?.address) throw new Error('run reg-contract first');
+  const { deployCheck } = await import(pathToFileURL(join(REPO, 'src', 'deployer.mjs')).href);
+  for (const [standard, cfg] of Object.entries(REG_STANDARDS)) {
+    const r = deployCheck({ interfaceSrc: cfg.interfaceSrc, interfaceOut: cfg.interfaceOut, fullOut: REG_OUT, outDir: join(SITE_DIR, 'registry', standard), url: cfg.url, address: record.registry.address, indexerUrl: profile.indexer });
+    const payload = Buffer.from(r.payload);
+    record.registry.bundles[standard] = { url: r.url, commitment: hex(payload.subarray(0, 32)), files: JSON.parse(readFileSync(join(SITE_DIR, 'registry', standard, 'index.json'), 'utf8')).files.length };
+    save();
+    log('reg.bundle', { standard, ...record.registry.bundles[standard] });
+  }
+}
+
+async function stepRegPublish() {
+  if (!record.registry?.bundles?.erc20) throw new Error('run reg-bundles first');
+  const { readIndex, materialize } = await import(pathToFileURL(join(REPO, 'src', 'fetch.mjs')).href);
+  const { commitment, encodePoint, indexEntries } = await import(pathToFileURL(join(REPO, 'src', 'hash.mjs')).href);
+  const todo = Object.entries(record.registry.bundles).filter(([standard]) => !record.registry.published[standard]);
+  for (const [standard, b] of todo) {
+    const { index } = await readIndex({ url: b.url });
+    const hosted = hex(encodePoint(commitment(indexEntries(index))));
+    if (hosted !== b.commitment) throw new Error(`${standard}: hosted index.json commits to ${hosted}, expected ${b.commitment}`);
+    const got = await materialize({ index, url: b.url });
+    rmSync(got.dir, { recursive: true, force: true });
+    log('reg.hosted.ok', { standard, files: index.files.length });
+  }
+  if (todo.length === 0) { log('reg.published.already', record.registry.published); return; }
+  await withContract(async ({ providers, compiledContract }) => {
+    const contract = await findDeployedContract(providers, { compiledContract, contractAddress: record.registry.address, privateStateId: 'coc-erc20-registry' });
+    for (const [standard, b] of todo) {
+      const started = Date.now();
+      const r = await contract.callTx.publishInterface(pad32(`iface/v1/${standard}`), new Uint8Array(Buffer.from(b.commitment, 'hex')), b.url);
+      record.registry.published[standard] = txRecord(r.public);
+      save();
+      log('reg.published', { standard, txHash: r.public.txHash, blockHeight: Number(r.public.blockHeight), ms: Date.now() - started });
+    }
+  }, { outDir: REG_OUT, witnesses: { publisherSecret: true } });
+}
+
+async function stepRegRead() {
+  const rt = await import(pathToFileURL(join(REPO, 'node_modules', '@midnight-ntwrk', 'compact-runtime', 'dist', 'index.js')).href);
+  const res = await fetch(profile.indexer, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: 'query($a: HexEncoded!) { contractAction(address: $a) { state transaction { hash block { height } } } }', variables: { a: record.registry.address } }) });
+  const { data } = await res.json();
+  const cs = rt.ContractState.deserialize(Buffer.from(data.contractAction.state, 'hex'));
+  let v = cs.data.state; while (v.type() === 'array') v = v.asArray().at(-1);   // last leaf
+  const map = v.type() === 'map' ? v.asMap() : null;
+  const entries = (map?.keys() ?? []).map((k) => {
+    const key = Buffer.alloc(32); Buffer.from(k.value[0] ?? new Uint8Array()).copy(key);
+    const cell = map.get(k).asCell();
+    return { key: key.toString('utf8').replace(/\0+$/, ''), atoms: cell.value.map((a) => Buffer.from(a).toString('hex')), alignment: JSON.stringify(cell.alignment).slice(0, 160) };
+  });
+  log('reg.read', { block: data.contractAction.transaction.block.height, lastLeaf: v.type(), entries });
+}
+
+const steps = { 'reg-contract': stepRegContract, 'reg-bundles': stepRegBundles, 'reg-publish': stepRegPublish, 'reg-read': stepRegRead, contract: stepContract, circuits: stepCircuits, bundle: stepBundle, publish: stepPublish, 'iface-write': stepIfaceWrite, 'iface-read': stepIfaceRead };
 const step = process.argv[2];
 if (!steps[step]) { console.error(`usage: deploy.mjs ${Object.keys(steps).join('|')}`); process.exit(2); }
 await steps[step]();

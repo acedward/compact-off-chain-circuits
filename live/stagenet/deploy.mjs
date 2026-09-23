@@ -12,7 +12,8 @@
 // Needs the repository built (scripts/build.sh), contracts/ERC20Live compiled, and a proof
 // server at MN_PROOF_SERVER_URL.
 // Reads STAGENET_WALLET_MNEMONIC; the seed is derived in memory and never printed.
-// Wallet and provider wiring follows acedward/mip-erc7496-midnight-contracts@17216362
+// Wallet and provider wiring follows the Stagenet deployment scripts of the earlier
+// ERC-7496 token-metadata contracts (commit 17216362),
 // scripts/deploy-and-publish.ts, which deployed to Stagenet with the same toolchain.
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';

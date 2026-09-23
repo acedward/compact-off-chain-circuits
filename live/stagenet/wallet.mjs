@@ -4,7 +4,8 @@
 //   node --env-file=../../.env wallet.mjs                  # sync, print NIGHT and DUST
 //   MODE=register node --env-file=../../.env wallet.mjs    # also register NIGHT for DUST
 //
-// Ported from acedward/mip-erc7496-midnight-contracts@17216362 scripts/register-dust.ts,
+// Ported from scripts/register-dust.ts of the earlier ERC-7496 token-metadata contracts
+// (commit 17216362),
 // which deployed to Stagenet with the same toolchain. Reads STAGENET_WALLET_MNEMONIC,
 // derives the BIP-39 seed in memory and never prints it. A registration is
 // signature-only and needs no proof server.

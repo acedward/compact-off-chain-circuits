@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// The two indexer queries the consumer needs. Nothing else is read from the
-// chain, and the tool works entirely without this file when the event payload
+// The two indexer queries the consumer needs (discovery uses the same two).
+// Nothing else is read from the chain, and the tool works entirely without this file when the event payload
 // and the state bytes are supplied by hand (indexer < 4.4.0, or offline).
 //
 // Midnight indexer 4.4.0-rc.1, GraphQL v4 (`/api/v4/graphql`):
@@ -41,26 +41,47 @@ query BundleEvents($address: HexEncoded!, $limit: Int!, $offset: Int!) {
 }`;
 
 /**
- * Latest `bundle/v1` event for a contract, plus the ids it supersedes.
- * Returns null when the contract has never published one.
+ * Every `Misc` event of a contract, oldest first, with its name decoded:
+ * `{ id, name, nameHex, payload, txHash, blockHeight }`. Pages until a short
+ * page comes back. Used by discovery (src/registry.mjs) for the per-standard
+ * `iface/v1/<standard>` events as well as `bundle/v1`.
  */
-export async function fetchLatestBundleEvent(graphqlUrl, address) {
+export async function fetchMiscEvents(graphqlUrl, address) {
   const limit = 500;
   const all = [];
   for (let offset = 0; ; offset += limit) {
     const data = await gql(graphqlUrl, EVENTS_QUERY, { address: stripHex(address), limit, offset });
     const page = data.contractEvents ?? [];
-    all.push(...page.filter((e) => e.name && decodeEventName(e.name) === BUNDLE_EVENT_NAME));
+    for (const e of page) {
+      if (!e.name) continue;
+      all.push({
+        id: e.id,
+        name: decodeEventName(e.name),
+        nameHex: stripHex(e.name),
+        payload: Buffer.from(stripHex(e.payload ?? ''), 'hex'),
+        txHash: e.transaction?.hash,
+        blockHeight: e.transaction?.block?.height,
+      });
+    }
     if (page.length < limit) break;
   }
-  if (all.length === 0) return null;
   all.sort((a, b) => a.id - b.id);
+  return all;
+}
+
+/**
+ * Latest `bundle/v1` event for a contract, plus the ids it supersedes.
+ * Returns null when the contract has never published one.
+ */
+export async function fetchLatestBundleEvent(graphqlUrl, address) {
+  const all = (await fetchMiscEvents(graphqlUrl, address)).filter((e) => e.name === BUNDLE_EVENT_NAME);
+  if (all.length === 0) return null;
   const latest = all[all.length - 1];
   return {
     id: latest.id,
-    payload: Buffer.from(stripHex(latest.payload), 'hex'),
-    txHash: latest.transaction?.hash,
-    blockHeight: latest.transaction?.block?.height,
+    payload: latest.payload,
+    txHash: latest.txHash,
+    blockHeight: latest.blockHeight,
     supersededIds: all.slice(0, -1).map((e) => e.id),
   };
 }

@@ -1,0 +1,163 @@
+# Where a contract advertises its interfaces
+
+A contract can offer several off-chain interfaces (bundles), for example `erc20` and `erc20-metadata`. A reader that holds only the contract's address needs to find each one's commitment and `index.json` URL, then verify it with the three levels described in the [README](../README.md). This page compares the places a contract can keep that information. Each one is implemented and tested in this repository, and every number below was measured, not estimated.
+
+Measured with `compact` 0.34.0, `@midnight-ntwrk/compact-runtime` 0.19.0 and Ledger v9 (Midnight Stagenet).
+
+## One name, one value
+
+Every placement uses the same name and the same value.
+
+| | |
+|---|---|
+| Name | `iface/v1/<standard>`, ASCII, at most 32 bytes, so `<standard>` is at most 23 bytes. Where 32 bytes are needed it is zero padded: `pad(32, "iface/v1/erc20")`. `bundle/v1`, the 00021 event, is the unnamed default standard. |
+| Value | `InterfaceRef { commitment: Bytes<32>; url: Opaque<"string">; }`: the bundle's 32-byte commitment and the URL of its `index.json`. |
+
+Readers recognise entries by the `iface/v1/` prefix, so no separate marker is needed.
+
+To find and check entries, use the tools in this repository:
+
+```sh
+# every entry, with the placement it came from
+node src/discover.mjs --indexer https://<indexer>/api/v4/graphql --address <contract address>
+node src/discover.mjs --state <state hex or file>          # offline, placements in the state only
+
+# verify one standard and run a read
+node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql --address <contract address> \
+  --circuit name --level 3
+```
+
+`discover` needs only `@midnight-ntwrk/compact-runtime` and `fetch`. It exits 0 when it finds an entry, 1 when it finds none, and 2 on a usage error. `verify --standard` takes the first placement that holds the standard, in this order: operations metadata, registry at the start of the ledger, registry at the end, newest event. It prints the placement it used and warns when another placement holds a different entry for the same standard.
+
+## Comparison
+
+| | P0 `bundle/v1` event | P1 event per standard | P2 operations metadata | P3 registry first | P4 registry last |
+|---|---|---|---|---|---|
+| Lives in | a `Misc` event | a `Misc` event | an entry point `iface/v1/<standard>` carrying IR | ledger field 0 | the last ledger field |
+| Code | `compact/OffChainInterface.compact` | `compact/registry/InterfaceEvents.compact` | none (maintenance update) | `compact/registry/InterfaceRegistry.compact`, imported first | `compact/templates/RegistryAtEnd.template.compact` |
+| Standards per contract | one | many | many | many | many |
+| Found from | indexer events | indexer events | state | state | state |
+| Update / remove | supersede only | supersede only | replace or remove the entry point | `publishInterface` / `removeInterface` | `publishInterface` / `removeInterface` |
+| Who can write | any caller, unless the contract restricts it | any caller, unless restricted | the maintenance authority only | any caller, unless restricted | any caller, unless restricted |
+| Other circuits' keys | unchanged | unchanged | unchanged | all ledger reads change (up to 15 fields) | unchanged up to 15 fields |
+| Publishing circuit prover key | 67,427,609 B | 67,441,880 B | no circuit, no proof | 279,188 B | 279,217 B |
+| Modelled bytes written (net) | 539 (0) | 539 (0) | not measured locally | 1,402 (+364) first entry | 1,402 (+364) first entry |
+| URL limit | 224 bytes | 224 bytes | none found (entry up to 10,485,760 B on Stagenet) | none | none |
+| Usable on an already deployed contract | yes, if it has the circuit (1) | yes, if it has the circuit (1) | yes | no, changes the layout | no, changes the layout |
+
+(1) The circuit's key is the same in every contract, so a maintenance authority could probably add it to a deployed contract, as 00021 did for `transfer`. This was not tried.
+
+"Modelled bytes written" is the `gasCost` the runtime reports for a local call with its default cost model, on the populated registry examples. The event circuits write and delete the same 539 bytes, so an event changes no contract state. A second registry entry costs 1,932 bytes (+530), an update 1,940 (+8), and a removal 1,410 (−530). Stagenet's cost model may differ.
+
+## P0 — the `bundle/v1` event
+
+**Where it lives.** `publishBundle(payload)` emits `Misc { name: pad(32, "bundle/v1"), payload }`. Bytes 0 to 31 of the payload are the commitment, and bytes 32 to 255 are the URL, zero padded.
+
+**How to find it.** `contractEvents(filter: { contractAddress, types: [MISC] })`. The newest event wins. `verify` without `--standard` uses it; `discover` reports it with standard `(default)`.
+
+**Key effect.** None. The circuit reads no ledger field, so it has the same key in every contract: identical in `examples/fungible`, `examples/registry-first` and `examples/registry-last`.
+
+**Cost.** 67,427,609-byte prover key, because the 256-byte payload is decomposed byte by byte. One transaction with one proof per bundle version.
+
+**Caveats.** One standard only. Needs an indexer with the contract-event API (4.4.0 or later, marked beta). Consumers that read only the state do not see it. An old event cannot be removed, only superseded.
+
+## P1 — one event per standard
+
+**Where it lives.** `publishInterfaceEvent(name, payload)` from `compact/registry/InterfaceEvents.compact` emits `Misc { name, payload }` with `name = pad(32, "iface/v1/<standard>")` and the P0 payload layout.
+
+**How to find it.** The same event query as P0. The newest event per name wins, and `discover` lists the ids it supersedes.
+
+**Key effect.** None, for the same reason as P0. The module declares no ledger field. Its key is identical in both registry examples, although their layouts differ.
+
+**Cost.** 67,441,880-byte prover key: the same cost as P0 for every entry written.
+
+**Caveats.** The same as P0. The caller assembles both the name and the payload, because Compact has no byte concatenation. `src/deployer.mjs` prints the payload.
+
+## P2 — operations metadata
+
+**Where it lives.** The contract's maintenance authority adds an entry point named `iface/v1/<standard>` whose operation carries IR bytes and no verifier key, with `IrInsert` in a signed maintenance update. The bytes are `"iface/v1\n"` followed by the JSON `{"commitment":"<hex>","url":"<url>"}`. The ledger checks only the size (Stagenet's `max_contract_metadata_size` is 10,485,760 bytes per entry point).
+
+**How to find it.** List `ContractState.operations()` and keep the names starting with `iface/v1/`. `ContractOperation` exposes no IR accessor in JavaScript, and `toString()` prints only `<verifier key>`, so `discover` looks for the magic in `operation(name).serialize()` and parses the one JSON object after it. In the serialization, the 160-byte blob of the live entry follows a 32-byte tag and 9 bytes of framing that include its SCALE-compact length.
+
+**Key effect.** None. No existing entry point changes.
+
+**Cost.** No circuit and no proof. On Stagenet the 00021 contract `294c2b6a…07cf913` got `iface/v1/erc20` in block 582774: a 160-byte blob, `SucceedEntirely`, 23 seconds from submission.
+
+**Update authority.** Only the maintenance authority, which makes this the one placement that is restricted without extra code. It is also why `verify --standard` prefers it.
+
+**Caveats.** It uses operation IR for data, which is not what IR is for. A future Midnight version that validates IR could reject such entries or remove the ability to add them. Entry point names are public. Tests build these operations locally with a helper in `test/helpers.mjs` that reproduces the live operation byte for byte; real writes use ledger-v9 `IrInsert`.
+
+## P3 — registry at the start of the ledger
+
+**Where it lives.** `compact/registry/InterfaceRegistry.compact` declares `__interfaces: Map<Bytes<32>, InterfaceRef>` and exports `publishInterface(standard, commitment, url)` and `removeInterface(standard)`. The contract imports it before any other module that declares a ledger, so the map is field 0. Field 0 is always the state's first leaf, whatever the layout. Example: `compact/examples/registry-first/`.
+
+**How to find it.** Descend first children while the value is an array, down to a map, then accept the map only if at least one key has the `iface/v1/` prefix (see "Discovery" below).
+
+**Key effect.** Every other field moves up one position. In the example, all six ERC-20 reads get new keys, so the registry-first contract needs its own interface (`examples/registry-first/Interface.compact`), which imports the same two modules in the same order. `check-keys` confirms it matches its contract. Above 15 fields the effect is partial (see "Layout rules").
+
+**Cost.** 279,188-byte prover key for `publishInterface` and 146,695 bytes for `removeInterface`: about 240 times smaller than an event.
+
+**Caveats.**
+- "First" means first from the contract. Inside a module, the module's own fields come before those of the modules it imports, so a registry imported by a module that declares a ledger lands after that module's fields.
+- Import it once. Each import of a module gets its own copy of the module's ledger, so a second import makes a second registry.
+- There is no access control. The header of the module shows the commented publisher check to put in the contract's wrapper.
+
+## P4 — registry at the end of the ledger
+
+**Where it lives.** The contract declares the same map as its last ledger declaration, with the two setters. It imports the struct from `compact/registry/InterfaceTypes.compact`, which has no ledger fields; declaring the struct inline produces the same key and the same state encoding. Contract fields follow every imported module's fields, so the map is the last field, and the last field is always the state's last leaf. Template: `compact/templates/RegistryAtEnd.template.compact`. Example: `compact/examples/registry-last/`. The live Stagenet registry contract `2f4f7e6f…877f115` has this shape, with nine fields.
+
+**How to find it.** The same as P3, descending last children.
+
+**Key effect.** No other field moves. In the example (7 token fields plus the registry), all six reads keep the fungible example's keys, so the unchanged `FungibleTokenReadable.Interface.compact` still matches. This holds only while the ledger, registry included, has at most 15 fields. Beyond that, one more field regroups the others (see "Layout rules").
+
+**Cost.** 279,217-byte prover key for `publishInterface` and 146,723 bytes for `removeInterface`. The key differs from P3's because the circuit writes a different slot.
+
+**Caveats.**
+- Keep it last. Any later ledger declaration takes the last leaf, including the fields of a module defined later in the same file: modules defined inline contribute their fields where they are defined, while imported files come first.
+- A contract with no fields of its own and no inline modules can instead import `InterfaceRegistry` last: the last file import is the last field.
+- There is no access control. The commented check in the template compiles once uncommented, and a test checks this.
+
+## Studied, not delivered
+
+**A declared or deterministic position.** Compact has no keyword that places a ledger field at a chosen slot. The order is fixed by these rules: file imports first in import order, pre-order inside modules, then the contract's own declarations in the order written. Import order is the only control, and it gives exactly one fixed position that does not depend on the contract: field 0, which is P3. The last field (P4) also needs no layout knowledge, but it depends on nothing being declared after it.
+
+**Empty space.** There is none. Arrays are sized exactly. The live ERC-20 state is an array of exactly 7 entries, and generated contracts of 1 to 250 fields have exactly one leaf per field. The VM keeps arrays at a fixed size, so no spare slot exists to write into.
+
+## Layout rules
+
+These are the rules the ledger placements depend on. They were measured on generated contracts, and `test/placement-layout.test.mjs` checks them.
+
+- Fields of modules imported from files come first, in import order. Inside a module, its own fields come before those of the modules it imports, wherever the `import` line sits. The contract's own declarations come last, in the order written, and a module defined inline counts at its definition.
+- Up to 15 fields form one flat array. Beyond that, fields are grouped into arrays of 15 counted from the end, with the remainder first, recursively: 16 fields give `[[1],[15]]`, 17 give `[[2],[15]]`, 31 give `[[1],[15],[15]]`, and 250 give `[[10,15],[15 × 15]]`. A single field is still an array of one.
+- The first leaf is always field 0 and the last leaf always the last field.
+- A read circuit's key depends on the path of the slot it reads, not on the size of the ledger. So a placement changes a key exactly when it changes that path:
+
+| Fields before the registry | Registry first (P3) keeps the key of | Registry last (P4) keeps the key of |
+|---|---|---|
+| 7 (the fungible example) | nothing | every field |
+| 14 | nothing | every field |
+| 15 | nothing | nothing (16 fields regroup as `[[1],[15]]`) |
+| 16 | fields 1 to 15 | field 0 only |
+
+For a contract above 15 fields, neither ledger placement leaves its keys unchanged. Only the events (P0, P1) and the operations metadata (P2) do.
+
+## Discovery
+
+`src/registry.mjs` implements the steps below. The tests run them on both examples, on generated contracts of 20 and 250 fields, on the other examples, and on two captured Stagenet states.
+
+1. **Operations metadata.** For each entry point named `iface/v1/<standard>`, find `"iface/v1\n"` in the serialized operation and parse one JSON object after it. The commitment must be 64 hex characters and the URL present.
+2. **Ledger, first and last.** From the root of the state, descend first (or last) children while the value is an array. A one-field ledger has one leaf, and it is reported once.
+3. **Registry test.** Accept the leaf only if it is a map with at least one key that, as `Bytes<32>` padded back to 32 bytes, is ASCII starting `iface/v1/`. Keys without the prefix are ignored.
+4. **Values.** A registry value is one cell with alignment `[bytes(32), compress]` and two atoms: the commitment with trailing zero bytes stripped (padded back to 32), then the URL's UTF-8 bytes. The struct's fields are concatenated with no tag. Map keys are one `bytes(32)` atom, also with trailing zeros stripped.
+5. **Events.** Take `Misc` events named `bundle/v1` or `iface/v1/<standard>`. The newest per name wins.
+
+A name longer than 23 bytes after the prefix, a prefixed key whose value is not an `InterfaceRef`, or an `iface/v1/` entry point without the blob is reported under "ignored" and never returned as an entry. On `examples/fungible`, `examples/nft` and `examples/multi`, discovery finds nothing. The last field of `examples/nft` is a populated map; discovery looks at it and rejects it.
+
+## Evidence on Stagenet
+
+Two Stagenet states are stored under `test/fixtures/` and decoded by `test/operations.test.mjs`:
+
+- `stagenet-294c2b6a-state.hex`, the 00021 ERC-20 contract at block 582774: one P2 entry, `iface/v1/erc20`, with commitment `cebd25ff…335eb1` and URL `https://compact-off-chain-circuits.pages.dev/erc20/index.json`.
+- `stagenet-2f4f7e6f-registry-state.hex`, the P4 registry contract at block 587203: `erc20`, with commitment `1149cc06…2acf43`, and `erc20-metadata`, with commitment `c53c75fa…5c03b1`, both in its last field at path `[8]`.
+
+## Prior art

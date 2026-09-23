@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: Apache-2.0
+// compact-off-chain-circuits — one event per standard (placement P1).
+//
+// The generalisation of `publishBundle` (placement P0, event `bundle/v1`): the
+// caller names the entry, so one contract can advertise several standards.
+//
+//   name     pad(32, "iface/v1/<standard>")
+//   payload  commitment (32 bytes) ++ utf8(index.json URL), zero padded to 256
+//            bytes, the same layout as 00021's bundle/v1 payload
+//
+// The caller assembles both (src/deployer.mjs prints the payload), because
+// Compact has no byte concatenation. Readers take the newest event per name;
+// an entry cannot be removed, only superseded.
+//
+// The circuit reads no ledger field and this module declares none, so it has
+// the same verifier key in every contract and importing it changes no other
+// key. Its cost is proving: the 256-byte payload makes a prover key of about
+// 67 MB, against about 0.3 MB for a registry map insert.
+//
+// There is NO access control here; see InterfaceRegistry.compact for the
+// commented publisher check, which applies unchanged.
+//
+// Self-contained: copy it into any Compact project on its own.
+
+pragma language_version >= 0.23.0;
+
+module InterfaceEvents {
+  import CompactStandardLibrary;
+
+  /**
+   * @description Advertises one interface as a Misc event.
+   * @param {Bytes<32>} name - pad(32, "iface/v1/<standard>").
+   * @param {Bytes<256>} payload - commitment (32 bytes) ++ utf8(index.json url) zero padded.
+   * @return {[]} - Empty tuple.
+   */
+  export circuit publishInterfaceEvent(name: Bytes<32>, payload: Bytes<256>): [] {
+    emit(Misc { name: disclose(name), payload: disclose(payload) });
+  }
+}

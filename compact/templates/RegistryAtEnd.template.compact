@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: Apache-2.0
+// compact-off-chain-circuits — interface registry at the END of the ledger
+// (placement P4).
+//
+// Copy the three marked blocks into your contract. This file compiles as is, as
+// a minimal contract, so the blocks are known to be valid; `counter` stands for
+// your own ledger.
+//
+// WHY THE END
+//
+// Compact lays out ledger fields module by module, in import order, then the
+// contract's own fields in declaration order, wherever the declarations and
+// imports sit in the file. So a map declared as the contract's LAST ledger
+// declaration is the last field, and the last field is always the state's last
+// leaf however many fields precede it: a reader finds the registry without
+// knowing the contract's layout.
+//
+// KEY EFFECT
+//
+// Appending a field moves no other field's position. Existing verifier keys
+// stay identical as long as the ledger, registry included, has at most 15
+// fields. Above 15, Compact groups fields in arrays of 15 counted from the END,
+// so one more field regroups the others and changes the keys of circuits that
+// read them (measured: 15 -> 16 fields changes every key; 16 -> 17 keeps field
+// 0's). The OpenZeppelin FungibleToken has 7 fields, so the registry makes 8
+// and its published interface stays valid unchanged.
+//
+// KEEP IT LAST
+//
+// Any ledger declaration added after `__interfaces`, including the fields of a
+// module DEFINED later in this file (inline modules contribute their fields
+// where they are defined; imported files come first), takes the last leaf
+// instead, and readers stop finding the registry. Declaring the struct inline, as
+// `export struct InterfaceRef { commitment: Bytes<32>; url: Opaque<"string">; }`,
+// is equivalent to importing it.
+//
+// ACCESS CONTROL
+//
+// None here: anyone who can call the contract can overwrite or remove an entry.
+// The commented lines are the check from the README's "How to use"; uncommented
+// they compile as written. `publisher` is a contract field and so must also be
+// declared BEFORE `__interfaces`.
+
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+
+// --- block 1: the entry type (ledger-free, so this import moves nothing) ---
+import "../registry/InterfaceTypes";
+
+// Stand-in for your contract's own ledger and circuits.
+export ledger counter: Counter;
+export circuit increment(): [] { counter.increment(1); }
+
+// --- block 2: the setters ---
+// witness publisherSecret(): Bytes<32>;
+// export ledger publisher: Bytes<32>;   // set in the constructor; declared before __interfaces
+
+export circuit publishInterface(standard: Bytes<32>, commitment: Bytes<32>, url: Opaque<"string">): [] {
+  // assert(persistentHash<Vector<2, Bytes<32>>>([pad(32, "coc:publisher:"), publisherSecret()]) == publisher,
+  //        "only the publisher can publish an interface");
+  __interfaces.insert(disclose(standard), InterfaceRef { commitment: disclose(commitment), url: disclose(url) });
+}
+
+export circuit removeInterface(standard: Bytes<32>): [] {
+  __interfaces.remove(disclose(standard));
+}
+
+// --- block 3: the registry, pad(32, "iface/v1/<standard>") -> InterfaceRef ---
+// Keep this the LAST ledger declaration of the contract.
+export ledger __interfaces: Map<Bytes<32>, InterfaceRef>;

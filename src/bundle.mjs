@@ -46,6 +46,10 @@ export function resolveImports(src, seen = new Set()) {
   return out;
 }
 
+/** `Foo` for `Foo.Interface.compact`; the directory's name for a bare `Interface.compact`. */
+export const bundleStem = (src) => (basename(src) === 'Interface.compact'
+  ? basename(dirname(resolve(src))) : basename(src).replace(/\.Interface\.compact$/, ''));
+
 /** Longest directory prefix shared by all of `paths`. */
 export function commonRoot(paths) {
   const split = paths.map((p) => resolve(p).split(sep));
@@ -111,7 +115,7 @@ export function assembleBundle({ interfaceSrc, interfaceOut, outDir, url: reques
     interface: interfaceRel,
   };
   writeFileSync(join(outDir, 'package.json'), JSON.stringify({
-    name: `${basename(interfaceSrc).replace(/\.Interface\.compact$/, '').toLowerCase()}-interface-bundle`,
+    name: `${bundleStem(interfaceSrc).toLowerCase()}-interface-bundle`,
     version: '1.0.0',
     private: true,
     type: 'module',

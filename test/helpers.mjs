@@ -18,6 +18,13 @@ export const PUBLISHED = {
   multi: ['uri', 'balanceOf'],
 };
 
+/**
+ * The `--args` form of the key `scripts/simulate-deploy.mjs` `user(name)` mints to:
+ * the left arm of `Either<Bytes<32>, ContractAddress>`, `pad(32, name)` as 64 hex
+ * digits. `verify` takes `Bytes<N>` only as exactly 2N hex digits.
+ */
+export const userKeyArg = (name) => `key:0x${Buffer.concat([Buffer.from(name, 'utf8'), Buffer.alloc(32)]).subarray(0, 32).toString('hex')}`;
+
 export const interfaceSrc = (example) => join(REPO, 'compact', 'integrations', 'openzeppelin', {
   fungible: 'FungibleTokenReadable', nft: 'NonFungibleTokenReadable', multi: 'MultiTokenReadable',
 }[example] + '.Interface.compact');

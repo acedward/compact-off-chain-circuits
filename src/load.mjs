@@ -11,7 +11,8 @@
 //
 // Instead the wrapper is copied to a private temporary file whose runtime import
 // is pinned to the copy this tool was installed with. Nothing else in the bundle
-// directory is ever loaded as code.
+// directory is ever loaded as code. src/verify.mjs reaches this only inside the
+// child process of src/execute.mjs `executeInChild`, never in its own process.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -26,8 +27,12 @@ export const RUNTIME_URL = pathToFileURL(createRequire(import.meta.url).resolve(
 const RUNTIME_IMPORT = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])@midnight-ntwrk\/compact-runtime\2/g;
 const loaded = new Map();
 
-/** Import `<bundleDir>/out/contract/index.js` with its runtime import pinned to RUNTIME_URL. */
-export async function loadWrapper(bundleDir) {
+/**
+ * Import `<bundleDir>/out/contract/index.js` with its runtime import pinned to
+ * RUNTIME_URL. The pinned copy is written under `tmpRoot` (default: the system
+ * temporary directory) and removed once imported.
+ */
+export async function loadWrapper(bundleDir, { tmpRoot = tmpdir() } = {}) {
   const source = readFileSync(join(bundleDir, 'out', 'contract', 'index.js'), 'utf8');
   if (loaded.has(source)) return loaded.get(source);
 
@@ -38,7 +43,7 @@ export async function loadWrapper(bundleDir) {
   });
   if (pinnedImports === 0) throw new Error(`out/contract/index.js does not import ${RUNTIME}: not a Compact wrapper`);
 
-  const dir = mkdtempSync(join(tmpdir(), 'coc-wrapper-'));
+  const dir = mkdtempSync(join(tmpRoot, 'coc-wrapper-'));
   try {
     const file = join(dir, 'index.mjs');
     writeFileSync(file, pinned);

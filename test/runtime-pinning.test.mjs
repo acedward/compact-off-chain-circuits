@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { deployCheck } from '../src/deployer.mjs';
-import { executeCircuit } from '../src/execute.mjs';
+import { executeCircuit, executeInChild } from '../src/execute.mjs';
 import { verify } from '../src/verify.mjs';
 import { RUNTIME, RUNTIME_URL } from '../src/load.mjs';
 import { simulate } from '../scripts/simulate-deploy.mjs';
@@ -59,6 +59,11 @@ describe.skipIf(!isBuilt())(`runtime pinning (${isBuilt() ? 'built' : BUILD_HINT
 
   it('executing directly in the planted directory still uses the verifier\'s own runtime', async () => {
     const { text } = await executeCircuit({ bundleDir: bundle.outDir, stateBytes: sim.state, circuitName: 'tokenURI', args: ['1'] });
+    expect(text).toBe('"https://nft.example/meta/1.json"');
+  });
+
+  it('so does the child process verify() executes in, run in the planted directory', async () => {
+    const { text } = await executeInChild({ bundleDir: bundle.outDir, stateBytes: sim.state, circuitName: 'tokenURI', args: ['1'] });
     expect(text).toBe('"https://nft.example/meta/1.json"');
   });
 });

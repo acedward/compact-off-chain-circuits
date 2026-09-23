@@ -164,7 +164,11 @@ as this repository's `src/verify.mjs`; the bundle carries no copy of it, because
 files supplied by the party being checked prove nothing to a consumer who does
 not already trust you and your host. The verifier never loads code from the
 bundle other than the generated wrapper, whose runtime import it pins to its
-own installed runtime.
+own installed runtime, and it runs that wrapper only in a fresh child process,
+never in its own. Whatever the wrapper does cannot change the verifier's process
+or a later verification in it, which matters when one long-running process
+verifies many contracts. The child is not a sandbox: the wrapper runs with the
+permissions of whoever runs the verifier.
 
 Without an indexer that serves events (indexer < 4.4.0), or offline, the same
 checks run from captured inputs, against the URL or against a local copy of the
@@ -186,22 +190,39 @@ What they get:
   commitment.
 * **Level 2** — every verifier key in the bundle equals the key stored on chain
   for that entry point, and every published circuit that has an entry point on
-  chain ships its key. The published circuits are the deployed circuits. No
-  compiler needed.
+  chain ships its key. The shipped keys are the deployed keys, so a key that
+  passed ties its circuit to the chain. The circuit's code is not tied: at
+  Level 2 the executed wrapper is the entry writer's code, whoever wrote the
+  entry the consumer followed. No compiler needed.
 * **Level 3** (`--level 3`, needs the pinned `compact` toolchain) — recompiling
   the published source, a file the index lists, reproduces exactly the shipped
-  keys and `index.js` byte for byte,
-  which binds the source and the generated wrapper to the deployed circuit and
-  removes you from the trust chain.
+  keys, `index.js` and `contract-info.json` byte for byte,
+  which binds the source, the generated wrapper and the circuit signatures to
+  the deployed circuit and removes you from the trust chain. The compile runs
+  without `COMPACT_PATH` and may read only files inside the bundle that the
+  index lists: an import or include that the compiler finds anywhere else fails
+  Level 3. The verifier checks this with the compiler's own `--trace-search`
+  output, which compactc prints from 0.30.0 on.
 
 The tool prints the level it reached, and for indexer input the block height and
 transaction hash of the state it read. Its exit status is 0 when everything
 asked for verified (and the circuit, if one was named, returned a value), 1 when
 a level that ran failed or the named circuit was not run, 2 for a usage or input
-error, and 3 when the checks passed but the circuit rejected the arguments. No
-code from the bundle runs before the checks pass, and only a circuit whose key
-passed Level 2 runs: a pure circuit, which has no key, is refused. A pure
-circuit can still be called from the published code, but no level verifies it.
+error, arguments that do not fit the circuit included, and 3 when the checks
+passed but the circuit rejected the arguments (a failed assert). No code from
+the bundle runs before the checks pass, and only a circuit whose key passed
+Level 2 runs: a key is what ties a circuit to the chain, so a pure circuit,
+which has no key, is refused. The key ties the circuit, not its code; the code
+is tied only at Level 3. A pure circuit can still be called from the published
+code, but no level verifies it.
+
+Arguments are strict, so that a typo cannot turn into a different, valid
+argument. A `Bytes<N>` argument takes exactly 2N hex digits, with an optional
+`0x`; `Uint` and `Field` take a decimal integer within the type's range; an
+`Either` takes `key:<hex>` for the left arm or `addr:<hex>` for the right arm.
+Nothing is cut or zero-padded, and text is not accepted for `Bytes<N>`. Any
+other value is an input error (exit 2), reported after the checks, and the
+circuit does not run.
 
 Level 2 also compares the shipped keys with the `expectedVk` table the compiler
 embeds in `index.js`, which catches a bundle assembled from artifacts of two

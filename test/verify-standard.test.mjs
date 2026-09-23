@@ -18,7 +18,7 @@ import { deployCheck } from '../src/deployer.mjs';
 import { ifaceBlob, ifaceKey } from '../src/registry.mjs';
 import { verify } from '../src/verify.mjs';
 import { deploySimulated, user } from '../scripts/simulate-deploy.mjs';
-import { COMPACT_HINT, REGISTRY_BUILD_HINT, REPO, fullOut, hasCompact, irOperationBytes, isRegistryBuilt, registryInterface, scratch } from './helpers.mjs';
+import { COMPACT_HINT, REGISTRY_BUILD_HINT, REPO, fullOut, hasCompact, irOperationBytes, isRegistryBuilt, registryInterface, scratch, userKeyArg } from './helpers.mjs';
 
 const run = promisify(execFile);
 const node = (script, args) => run(process.execPath, [join(REPO, 'src', script), ...args], { cwd: REPO }).then(
@@ -71,7 +71,7 @@ describe.skipIf(!isRegistryBuilt())(`verify --standard (${isRegistryBuilt() ? 'b
     });
 
     it(`${example}: with no bundle given, verify fetches the URL found in the registry`, async () => {
-      const r = await verify({ stateBytes: stateOf(example), standard: 'iface/v1/erc20', circuit: 'balanceOf', args: ['alice'] });
+      const r = await verify({ stateBytes: stateOf(example), standard: 'iface/v1/erc20', circuit: 'balanceOf', args: [userKeyArg('alice')] });
       expect(r.bundle).toMatchObject({ from: 'entry url', location: bundles[example].url });
       expect(r.checks.level1.requests).toBe(bundles[example].index.files.length + 1);
       expect(r.level).toBe(2);

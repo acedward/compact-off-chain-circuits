@@ -4,7 +4,7 @@ Run a Midnight contract's read circuits off chain, against its current state, an
 
 A contract commits once, in a single event, to the hash and URL of a small bundle: a partial Compact source containing only the circuits you want readable, plus what it compiles to. Anyone can then call those circuits locally, with no transaction and no proof, and verify the result at three levels. The bundle is a light binding. It carries verifier keys and the generated wrapper, never prover keys or zkir, which run to tens or hundreds of megabytes.
 
-Ready-made integrations for the OpenZeppelin FungibleToken, NonFungibleToken and MultiToken make their metadata (`name`, `symbol`, `decimals`, `tokenURI`, `uri`, …) readable this way. Targets Midnight 2.x (Ledger v9).
+The examples apply the pattern to OpenZeppelin's FungibleToken, NonFungibleToken and MultiToken, used unmodified, to show it is compatible with that well-known implementation and makes metadata such as `name`, `symbol`, `decimals`, `tokenURI` and `uri` readable. Targets Midnight 2.x (Ledger v9).
 
 ## How to use
 
@@ -20,9 +20,9 @@ For a contract author. The full procedure and a checklist are in [docs/INTEGRATI
    }
    ```
 
-   For an OpenZeppelin token, import `compact/integrations/openzeppelin/<Token>Readable.compact` instead of the upstream module. It already exports `publishBundle`.
+   The OpenZeppelin examples in `compact/integrations/openzeppelin/` show this step applied to unmodified OpenZeppelin token modules.
 
-2. **Write the interface.** Copy `compact/templates/Interface.template.compact`, import the same module your contract imports, and export the read circuits you want to publish under their deployed names. The OpenZeppelin integrations ship theirs as `*.Interface.compact`.
+2. **Write the interface.** Copy `compact/templates/Interface.template.compact`, import the same module your contract imports, and export the read circuits you want to publish under their deployed names. The OpenZeppelin examples include theirs as `*.Interface.compact`.
 
 3. **Build both.**
 
@@ -92,7 +92,7 @@ Once the levels pass, `verify` runs the circuit through the bundle's generated w
 
 ## How to test
 
-The three OpenZeppelin integrations, with deployable example contracts and simulated deployments, are the test data. You need `compact` 0.34.0 and Node 20 or later. The example contracts take several minutes to compile.
+The OpenZeppelin examples, with deployable contracts and simulated deployments, are the test data. You need `compact` 0.34.0 and Node 20 or later. The example contracts take several minutes to compile.
 
 ```sh
 npm ci
@@ -113,7 +113,7 @@ The `verify` run ends with `L1 OK`, five `L2 OK`, six `L3 OK` and `tokenURI(1) =
 ```
 compact/OffChainInterface.compact             the pattern: publishBundle(payload: Bytes<256>)
 compact/templates/Interface.template.compact  starting point for your interface
-compact/integrations/openzeppelin/            OpenZeppelin tokens with publishBundle, and their interfaces
+compact/integrations/openzeppelin/            example: unmodified OpenZeppelin tokens with publishBundle, and their interfaces
 compact/vendor/openzeppelin/                  upstream v0.3.0-alpha.1 @ 746724f8, unmodified, MIT
 compact/examples/*/Full.compact               deployable contracts used by the tests
 src/                                          deployer, verify, hash, indexer, execute, load

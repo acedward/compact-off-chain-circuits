@@ -41,9 +41,9 @@ export function compile(src, out) {
 }
 
 /**
- * A scratch directory INSIDE the repository. It has to be inside: a bundle's
- * generated wrapper imports `@midnight-ntwrk/compact-runtime`, which Node
- * resolves by walking up to the nearest node_modules.
+ * A scratch directory inside the repository's ignored tmp/. Bundles do not need
+ * to live here: the verifier pins the wrapper's runtime import to its own copy
+ * (src/load.mjs); test/runtime-pinning.test.mjs checks that from outside the repo.
  */
 export function scratch(label) {
   const base = join(REPO, 'tmp');

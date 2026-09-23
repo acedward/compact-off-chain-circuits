@@ -6,9 +6,9 @@
 // value and throw the public transcript away. No proof provider is contacted and
 // nothing is submitted; the state is never written back.
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import * as rt from '@midnight-ntwrk/compact-runtime';
+import { loadWrapper } from './load.mjs';
 
 /** Thrown when the circuit itself rejected the arguments (an `assert` failed). */
 export class CircuitAssertionError extends Error {
@@ -128,7 +128,8 @@ export async function executeCircuit({ bundleDir, stateBytes, circuitName, args 
 
   const entry = join(bundleDir, 'out', 'contract', 'index.js');
   if (!existsSync(entry)) throw new Error(`bundle is missing out/contract/index.js`);
-  const { Contract } = await import(pathToFileURL(resolve(entry)).href);
+  // Loaded against this tool's own runtime, never one found next to the bundle.
+  const { Contract } = await loadWrapper(bundleDir);
   const contract = new Contract({});
 
   const state = rt.ContractState.deserialize(Uint8Array.from(Buffer.from(stateBytes)));

@@ -120,15 +120,12 @@ node src/verify.mjs --bundle bundle/ \
   --circuit tokenURI --args 1
 ```
 
-A copy of `verify.mjs` and its helpers is inside the bundle, so a consumer who
-has fetched the bundle needs only Node and one npm dependency
-(`@midnight-ntwrk/compact-runtime`):
-
-```sh
-cd bundle
-npm install --no-package-lock     # a lock file in the bundle changes its hash
-node verify.mjs --indexer <url> --address <hex> --circuit tokenURI --args 1
-```
+Consumers should run a verifier they obtained independently of your bundle,
+such as this repository's `src/verify.mjs`. The bundle also carries a copy of
+`verify.mjs` and its helpers for convenience, but files supplied by the party
+being checked prove nothing to a consumer who does not already trust you and
+your host. The verifier never loads code from the bundle directory other than
+the generated wrapper, whose runtime import it pins to its own installed runtime.
 
 Without an indexer that serves events (indexer < 4.4.0), or offline, the same
 checks run from captured inputs:

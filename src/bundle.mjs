@@ -14,7 +14,7 @@
 //   out/contract/index.d.ts
 //   out/contract/package.json      { "type": "module" }, so Node loads index.js as ESM
 //   out/compiler/contract-info.json
-//   verify.mjs hash.mjs indexer.mjs execute.mjs   the consumer tool
+//   verify.mjs hash.mjs indexer.mjs execute.mjs load.mjs   copy of the consumer tool
 //
 // Deliberately absent: prover keys, zkir, and the source of every circuit that is
 // not published. The consumer tool works without them.
@@ -25,7 +25,7 @@ import { bundleHash, walk } from './hash.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** Files copied into the bundle so a consumer needs only Node and one npm dependency. */
-export const CONSUMER_TOOL_FILES = ['verify.mjs', 'hash.mjs', 'indexer.mjs', 'execute.mjs'];
+export const CONSUMER_TOOL_FILES = ['verify.mjs', 'hash.mjs', 'indexer.mjs', 'execute.mjs', 'load.mjs'];
 
 /**
  * Local `.compact` files imported by `src`, transitively (deepest first, no
@@ -143,11 +143,15 @@ contract committed to it on chain with one \`bundle/v1\` event carrying
 | Published circuits | ${circuits.map((c) => `\`${c}\``).join(', ')} |
 | Compiler / language / runtime | ${compact.compiler} / ${compact.language} / ${compact.runtime} |
 
-## Run a read
+## Verify and run a read
+
+Verify with a copy of the verifier you obtained independently of this
+directory, for example from the repository that built it
+(https://github.com/acedward/compact-off-chain-circuits):
 
 \`\`\`sh
-npm install --no-package-lock     # a lock file here would change this directory's hash
-node verify.mjs ${indexerUrl ? `--indexer ${indexerUrl} ` : '--indexer <graphql url> '}${address ? `--address ${address} ` : '--address <hex> '}--circuit ${circuits[0]}${circuits.length ? ' --args ...' : ''}
+node <compact-off-chain-circuits>/src/verify.mjs --bundle <this directory> \\
+  ${indexerUrl ? `--indexer ${indexerUrl} ` : '--indexer <graphql url> '}${address ? `--address ${address} ` : '--address <hex> '}--circuit ${circuits[0]}${circuits.length ? ' --args ...' : ''}
 \`\`\`
 
 This checks that this directory is the one the contract committed to (Level 1),
@@ -159,8 +163,13 @@ Offline, or against an indexer older than 4.4.0 (no event support), supply the
 inputs directly:
 
 \`\`\`sh
-node verify.mjs --event-payload <256-byte hex> --state <state hex or file> --circuit ${circuits[0]}
+node <compact-off-chain-circuits>/src/verify.mjs --bundle <this directory> \\
+  --event-payload <256-byte hex> --state <state hex or file> --circuit ${circuits[0]}
 \`\`\`
+
+The \`*.mjs\` files in this directory are a convenience copy of that verifier.
+The deployer wrote them, so running them from here proves nothing against a
+deployer or host you do not already trust.
 
 Add \`--level 3\` to recompile \`${compact.interface}\` with compact
 ${compact.compiler} and check that it reproduces the shipped keys and

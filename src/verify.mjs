@@ -19,6 +19,7 @@ import * as rt from '@midnight-ntwrk/compact-runtime';
 import { NPM_ARTIFACTS, bundleHash, fileHashes, parsePayload } from './hash.mjs';
 import { fetchLatestBundleEvent, fetchState } from './indexer.mjs';
 import { CircuitAssertionError, bundleInfo, executeCircuit } from './execute.mjs';
+import { loadWrapper } from './load.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sha256hex = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -69,7 +70,7 @@ export async function levelTwo(bundleDir, stateBytes) {
 
 /** Check `expectedVk` in the generated wrapper against the shipped keys. */
 export async function wrapperBinding(bundleDir) {
-  const mod = await import(pathToFileURL(resolve(join(bundleDir, 'out', 'contract', 'index.js'))).href);
+  const mod = await loadWrapper(bundleDir);
   const expected = mod.expectedVk;
   if (!expected) return { ok: true, skipped: true, reason: 'this compiler emits no expectedVk table' };
   const rows = [];

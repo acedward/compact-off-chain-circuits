@@ -27,7 +27,7 @@ node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql 
   --circuit name --level 3
 ```
 
-`discover` needs only `@midnight-ntwrk/compact-runtime` and `fetch`. It exits 0 when it finds an entry, 1 when it finds none, and 2 on a usage error. `verify --standard` takes the first placement that holds the standard, in this order: operations metadata, registry at the start of the ledger, registry at the end, newest event. It prints the placement it used and warns when another placement holds a different entry for the same standard.
+`discover` needs only `@midnight-ntwrk/compact-runtime` and `fetch`. It exits 0 when it finds an entry, 1 when it finds none, and 2 on a usage error. `verify --standard` takes the first placement that holds the standard, in this order: operations metadata, the spare root slot `[15]`, registry at the start of the ledger, registry at the end, newest event. The order follows the strongest write restriction a reader can rely on without knowing the contract: the maintenance authority, the deployer at deploy time, contract logic that may be ungated, then anyone who can call an emitting circuit. It prints the placement it used and warns when another placement holds a different entry for the same standard.
 
 ## Comparison
 
@@ -151,7 +151,7 @@ const tx = ledger.Transaction.fromParts(networkId, undefined, undefined,
 // submit tx, then store signingKey for the new address, as deployContract would
 ```
 
-**How to find it.** `[15]` is the root's last entry, so it is the state's last leaf, where discovery already looks. `discover` reports the entries as `ledger-last`, so the priority order is unchanged. They carry `spareSlot: true`, and `discover` and `verify` print `spare slot [15]`. The label is exact, because only a deployer-extended root has a 16th entry.
+**How to find it.** `[15]` is the root's last entry, so it is the state's last leaf, where discovery already looks. `discover` reports the entries as `ledger-last` with `spareSlot: true`, and `verify --standard` ranks them second: after operations metadata, before both ledger registries. `discover` and `verify` print `spare slot [15]`. The label is exact, because only a deployer-extended root has a 16th entry.
 
 **Key effect.** None, for any number of fields. No circuit changes, and no compactc circuit reads or writes `[15]`: `check-keys` still reports 25 IDENTICAL. On the extended state, the fungible example's seven reads give the same results as on the original state, and a write circuit keeps the root at 16 entries. The same holds for reads of field 0 and field 19 of a 20-field contract, whose root `[[5],[15]]` is padded to 16 entries. Contracts with 15 fields and with no fields were also tested.
 

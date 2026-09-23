@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { fetchMiscEvents, fetchState } from './indexer.mjs';
-import { inspectState, selectEntry } from './registry.mjs';
+import { asciiJson, inspectState, printable, selectEntry } from './registry.mjs';
 
 /**
  * Everything discovery sees: `{ entries, problems, leaves, source }`.
@@ -58,7 +58,9 @@ const USAGE = `coc-discover — list the interfaces a contract advertises and wh
 Placements: operations (entry point iface/v1/<standard> with IR), ledger-first
 (the first ledger field is the registry map), ledger-last (the last field is,
 or the spare root slot [15] a deployer filled), event (newest Misc event per
-name; bundle/v1 is the default standard).
+name; bundle/v1 is the default standard). Entries are listed in the order
+\`verify --standard\` prefers them: operations, spare slot [15], ledger-first,
+ledger-last, event.
 Exit status: 0 at least one entry found; 1 none found; 2 usage or input error.
 `;
 
@@ -90,44 +92,49 @@ export function readStateArg(s) {
   return Buffer.from(s.replace(/^0x/i, ''), 'hex');
 }
 
-const short = (h) => `${h.slice(0, 8)}…${h.slice(-6)}`;
-const where = (e) => e.placement === 'event' ? `event id ${e.eventId}${e.supersededIds?.length ? ` (supersedes ${e.supersededIds.join(', ')})` : ''}`
-  : e.spareSlot ? 'spare slot [15]' : e.path ? `path [${e.path.join('][')}]` : e.entryPoint ? 'entry point' : '';
+const p = printable;
+const short = (h) => `${p(h).slice(0, 8)}…${p(h).slice(-6)}`;
+const where = (e) => e.placement === 'event' ? `event id ${p(e.eventId)}${e.supersededIds?.length ? ` (supersedes ${e.supersededIds.map(p).join(', ')})` : ''}`
+  : e.spareSlot ? 'spare slot [15]' : e.path ? `path [${e.path.map(p).join('][')}]` : e.entryPoint ? 'entry point' : '';
 
+/**
+ * The human-readable listing. Every string from the chain or the indexer goes
+ * through `printable`, so none of them can add lines or terminal escapes.
+ */
 export function printInspection(r) {
   if (r.source.from === 'indexer') {
-    console.log(`indexer   : ${r.source.indexerUrl}`);
-    console.log(`contract  : ${r.source.address}`);
-    console.log(`state     : block ${r.source.blockHeight}, tx ${r.source.txHash}; ${r.source.events} Misc events`);
+    console.log(`indexer   : ${p(r.source.indexerUrl)}`);
+    console.log(`contract  : ${p(r.source.address)}`);
+    console.log(`state     : block ${p(r.source.blockHeight)}, tx ${p(r.source.txHash)}; ${p(r.source.events)} Misc events`);
   } else {
-    console.log(`state     : supplied directly; ${r.source.events} Misc events supplied`);
+    console.log(`state     : supplied directly; ${p(r.source.events)} Misc events supplied`);
   }
-  const leaf = (l) => l.type === 'none' ? 'empty ledger' : l.same ? 'same leaf as the first' : `${l.type} at ${l.spareSlot ? 'spare slot ' : ''}[${l.path.join('][')}]${l.type === 'map' ? (l.registry ? ', a registry' : ', not a registry') : ''}`;
+  const leaf = (l) => l.type === 'none' ? 'empty ledger' : l.same ? 'same leaf as the first' : `${p(l.type)} at ${l.spareSlot ? 'spare slot ' : ''}[${l.path.map(p).join('][')}]${l.type === 'map' ? (l.registry ? ', a registry' : ', not a registry') : ''}`;
   console.log(`ledger    : first leaf ${leaf(r.leaves.first)}; last leaf ${leaf(r.leaves.last)}`);
   if (r.entries.length === 0) {
     console.log('none found: this contract advertises no interface in any placement');
   } else {
-    const rows = r.entries.map((e) => [e.standard ?? '(default)', e.placement, short(e.commitment), e.url, where(e)]);
+    const rows = r.entries.map((e) => [p(e.standard ?? '(default)'), p(e.placement), short(e.commitment), p(e.url), where(e)]);
     const head = ['STANDARD', 'PLACEMENT', 'COMMITMENT', 'URL', 'WHERE'];
     const w = head.map((h, i) => Math.max(h.length, ...rows.map((row) => row[i].length)));
     for (const row of [head, ...rows]) console.log(row.map((c, i) => (i === row.length - 1 ? c : c.padEnd(w[i]))).join('  ').trimEnd());
   }
-  for (const p of r.problems) console.log(`ignored   : ${p.placement ?? 'ledger'} ${p.key}${p.eventId !== undefined ? ` (event ${p.eventId})` : ''}: ${p.reason}`);
+  for (const x of r.problems) console.log(`ignored   : ${p(x.placement ?? 'ledger')} ${p(x.key)}${x.eventId !== undefined ? ` (event ${p(x.eventId)})` : ''}: ${p(x.reason)}`);
 }
 
 async function main(argv) {
   let o;
-  try { o = parseArgv(argv); } catch (e) { console.error(`error: ${e.message}\n\n${USAGE}`); return 2; }
+  try { o = parseArgv(argv); } catch (e) { console.error(`error: ${printable(e.message)}\n\n${USAGE}`); return 2; }
   if (o.help) { console.log(USAGE); return 0; }
   let r;
   try {
     const events = o.events ? JSON.parse(readFileSync(o.events, 'utf8')) : undefined;
     r = await inspect({ indexerUrl: o.indexerUrl, address: o.address, stateBytes: o.state ? readStateArg(o.state) : undefined, events });
   } catch (e) {
-    console.error(`error: ${e.message}`);
+    console.error(`error: ${printable(e.message)}`);
     return 2;
   }
-  if (o.json) console.log(JSON.stringify({ entries: r.entries, problems: r.problems, leaves: r.leaves, source: r.source }, null, 2));
+  if (o.json) console.log(asciiJson({ entries: r.entries, problems: r.problems, leaves: r.leaves, source: r.source }, null, 2));
   else printInspection(r);
   return r.entries.length > 0 ? 0 : 1;
 }

@@ -37,9 +37,33 @@ import { SPARE_ROOT_SLOT, ifaceKey, ifaceName, normalizeRef } from './registry.m
 export const SPARE_SLOT = SPARE_ROOT_SLOT;
 /** Ledger v9's maximum array length. */
 export const MAX_ARRAY_ENTRIES = 16;
+/**
+ * Ledger v9's bound on a cell: the serialized size of its AlignedValue
+ * (`CELL_BOUND = 1 << 15`, onchain-state/src/state.rs). `ContractState.deserialize`
+ * enforces it; `StateValue.decode` does not, so this module checks it itself.
+ */
+export const CELL_BOUND = 32_768;
 
 const BYTES32 = new rt.CompactTypeBytes(32);
 const OPAQUE_STRING = rt.CompactTypeOpaqueString;
+
+// Serialized sizes, as the ledger computes them (base-crypto/src/fab/serialize.rs).
+/** A flagged integer takes 1 byte below 2^5, 2 below 2^12, 3 below 2^19. */
+const flaggedIntSize = (n) => (n < 1 << 5 ? 1 : n < 1 << 12 ? 2 : n < 1 << 19 ? 3 : Infinity);
+/** An atom is normalized (trailing zero bytes dropped); one byte below 32 is stored in its length byte. */
+function atomSize(bytes) {
+  let n = bytes.length;
+  while (n > 0 && bytes[n - 1] === 0) n--;
+  return n === 1 && bytes[0] < 32 ? 1 : flaggedIntSize(n) + n;
+}
+function segmentSize(seg) {
+  if (seg?.tag !== 'atom') throw new Error(`cannot size an alignment segment of kind ${seg?.tag}`);
+  return seg.value.tag === 'bytes' ? flaggedIntSize(seg.value.length) : 1;   // compress and field: 1 byte
+}
+/** A single item is written bare; several get a count first. */
+const listSize = (items, size) => (items.length === 1 ? size(items[0]) : flaggedIntSize(items.length) + items.reduce((t, x) => t + size(x), 0));
+/** The serialized size of an AlignedValue `{ value: Uint8Array[], alignment }`: what the cell bound applies to. */
+export const alignedValueSize = ({ value, alignment }) => listSize(value, atomSize) + listSize(alignment, segmentSize);
 
 /** `{ standard: ref }` or `[{ standard, commitment, url }]` -> `[[name, ref]]`, validated. */
 function refList(refs) {
@@ -72,6 +96,10 @@ export function interfaceMapValue(refs) {
       value: BYTES32.toValue(Uint8Array.from(Buffer.from(ref.commitment, 'hex'))).concat(OPAQUE_STRING.toValue(ref.url)),
       alignment: BYTES32.alignment().concat(OPAQUE_STRING.alignment()),
     };
+    const size = alignedValueSize(value);
+    if (size > CELL_BOUND) {
+      throw new Error(`${name}: a ${Buffer.byteLength(ref.url)}-byte URL makes a ${size}-byte InterfaceRef cell, over the ledger's 32,768-byte cell bound`);
+    }
     map = map.insert(key, rt.StateValue.newCell(value));
   }
   return rt.StateValue.newMap(map);
@@ -104,7 +132,8 @@ const isContractState = (s) => typeof s?.serialize === 'function' && typeof s?.o
  * input is not modified.
  *
  * Refuses a root that is not an array, a root that already has 16 entries, an
- * invalid standard name, a malformed commitment or URL, and an empty `refs`.
+ * invalid standard name, a malformed commitment or URL, an entry whose cell would
+ * exceed the ledger's 32,768-byte cell bound, and an empty `refs`.
  */
 export function withSpareSlotRegistry(state, refs) {
   if (state instanceof rt.StateValue) return patchRoot(state, refs);

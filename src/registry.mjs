@@ -8,7 +8,7 @@
 //                                00021's `bundle/v1` event is the unnamed default
 //   value  { commitment, url }   the bundle commitment and its index.json URL
 //
-// Placements this module reads, in the order `selectEntry` prefers them:
+// Placements this module reads:
 //
 //   operations    an entry point named iface/v1/<standard> whose operation carries
 //                 IR bytes "iface/v1\n" + JSON {"commitment":"<hex>","url":"..."},
@@ -21,6 +21,15 @@
 //                 P5; such entries also carry `spareSlot: true`)
 //   event         the newest Misc event per name: iface/v1/<standard> (P1) or
 //                 bundle/v1 (P0), payload = commitment ++ url
+//
+// `selectEntry` prefers, in this order: operations, the spare slot [15],
+// ledger-first, ledger-last, event. The order follows the strongest write
+// restriction a reader can rely on without knowing the contract: the
+// maintenance authority, the deployer at deploy time, contract logic that may
+// be ungated, then anyone who can call an emitting circuit.
+//
+// Every URL must be a single-line http(s) URL of printable ASCII; anything
+// else is reported as a problem, never as an entry.
 //
 // The ledger placements are found structurally, without the contract's layout:
 // field 0 is always the first leaf and the last field the last leaf, however
@@ -42,10 +51,35 @@ export const MAX_STANDARD_BYTES = KEY_BYTES - IFACE_PREFIX.length; // 23
 /** Root index 15: never used by compactc, allowed by Ledger v9 (placement P5). */
 export const SPARE_ROOT_SLOT = 15;
 
-/** `selectEntry` preference: the first placement that has the standard wins. */
-export const PLACEMENT_PRIORITY = ['operations', 'ledger-first', 'ledger-last', 'event'];
+/**
+ * `selectEntry` preference: the first rank that has the standard wins.
+ * `spare-slot` is a `ledger-last` entry at root [15] (`spareSlot: true`).
+ */
+export const PLACEMENT_PRIORITY = ['operations', 'spare-slot', 'ledger-first', 'ledger-last', 'event'];
+
+/** An entry's rank key in PLACEMENT_PRIORITY. */
+export const rankKey = (e) => (e.spareSlot ? 'spare-slot' : e.placement);
+const rank = (e) => PLACEMENT_PRIORITY.indexOf(rankKey(e));
 
 const hex = (b) => Buffer.from(b).toString('hex');
+const PREFIX_BYTES = Buffer.from(IFACE_PREFIX, 'ascii');
+
+/** `JSON.stringify`, with every character outside ASCII escaped as `\uXXXX`. */
+export function asciiJson(value, replacer, space) {
+  return JSON.stringify(value, replacer, space)
+    ?.replace(/[\u007f-￿]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
+/**
+ * A string from the chain or a bundle, made safe to print on a terminal: unchanged
+ * when it is printable ASCII, otherwise a JSON string literal in which every other
+ * character is escaped. No newline, escape sequence or bidirectional control
+ * reaches the output, so such a string cannot forge or hide report lines.
+ */
+export function printable(s) {
+  const t = String(s);
+  return /^[\x20-\x7e]*$/.test(t) ? t : asciiJson(t);
+}
 
 /** An event payload, 00021 layout: commitment (32 bytes) ++ utf8(url), zero padded to 256. */
 export function parseEventPayload(payload) {
@@ -111,10 +145,24 @@ function nameProblem(s) {
 // ---------------------------------------------------------------------------
 // Values
 // ---------------------------------------------------------------------------
+/**
+ * Why `url` cannot be an entry's URL, or null: it must be one line of
+ * printable ASCII without spaces, and an absolute http: or https: URL.
+ */
+export function urlProblem(url) {
+  if (typeof url !== 'string' || url.length === 0) return 'url is missing';
+  if (!/^[\x21-\x7e]+$/.test(url)) return 'url is not a single-line http(s) URL: it contains spaces, control or non-ASCII characters';
+  let parsed;
+  try { parsed = new URL(url); } catch { return 'url is not a single-line http(s) URL: it does not parse'; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return `url is not a single-line http(s) URL: scheme ${parsed.protocol}`;
+  return null;
+}
+
 function checkRef(ref, where) {
   if (!ref || typeof ref !== 'object') throw new Error(`${where}: not an object`);
   if (typeof ref.commitment !== 'string' || !/^[0-9a-f]{64}$/i.test(ref.commitment)) throw new Error(`${where}: commitment is not 32 bytes of hex`);
-  if (typeof ref.url !== 'string' || ref.url.length === 0) throw new Error(`${where}: url is missing`);
+  const why = urlProblem(ref.url);
+  if (why) throw new Error(`${where}: ${why}`);
   return { commitment: ref.commitment.toLowerCase(), url: ref.url };
 }
 
@@ -198,6 +246,8 @@ export function decodeInterfaceRef(value) {
   try { url = new TextDecoder('utf-8', { fatal: true }).decode(cell.value[1]); }
   catch { throw new Error('url is not UTF-8'); }
   if (url.length === 0) throw new Error('url is empty');
+  const why = urlProblem(url);
+  if (why) throw new Error(why);
   return { commitment: hex(commitment), url };
 }
 
@@ -242,10 +292,18 @@ export function readRegistryMap(map) {
   let otherKeys = 0;
   for (const key of map.keys()) {
     const kb = keyBytes(key);
-    const text = kb ? kb.toString('latin1').replace(/\0+$/, '') : '';
-    if (!kb || !PRINTABLE.test(text) || !text.startsWith(IFACE_PREFIX)) { otherKeys++; continue; }
+    // The prefix is tested on the raw bytes, so a prefixed key with a zero or
+    // control byte after it is reported rather than silently skipped.
+    if (!kb || !kb.subarray(0, IFACE_PREFIX.length).equals(PREFIX_BYTES)) { otherKeys++; continue; }
     registry = true;
-    const why = nameProblem(text) ?? (kb.subarray(0, text.length).includes(0) ? 'key has an interior zero byte' : undefined);
+    let end = kb.length;
+    while (end > 0 && kb[end - 1] === 0) end--;
+    const body = kb.subarray(0, end);
+    const text = body.toString('latin1');
+    const why = body.includes(0) ? 'key has a zero byte before its end'
+      : /[\x01-\x1f\x7f]/.test(text) ? 'key has a control byte'
+        : !PRINTABLE.test(text) ? 'key has a non-ASCII byte'
+          : nameProblem(text);
     if (why) { problems.push({ key: text, reason: why }); continue; }
     try {
       entries.push({ standard: parseName(text), key: text, ...decodeInterfaceRef(map.get(key)) });
@@ -330,6 +388,8 @@ export function fromEvents(events = []) {
       const payload = typeof ev.payload === 'string' ? Buffer.from(ev.payload.replace(/^0x/i, ''), 'hex') : Buffer.from(ev.payload);
       const { commitment, url } = parseEventPayload(payload);
       if (!url) throw new Error('the payload carries no URL');
+      const why = urlProblem(url);
+      if (why) throw new Error(why);
       entries.push({
         standard, key, placement: 'event', commitment: hex(commitment), url,
         eventId: ev.id, supersededIds: list.slice(0, -1).map((e) => e.id),
@@ -367,7 +427,6 @@ export function inspectState(state, { events } = {}) {
   const ops = fromOperations(cs);
   const led = fromLedger(cs);
   const evs = events ? fromEvents(events) : { entries: [], problems: [] };
-  const rank = (e) => PLACEMENT_PRIORITY.indexOf(e.placement);
   const entries = [...ops.entries, ...led.entries, ...evs.entries]
     .sort((a, b) => rank(a) - rank(b) || String(a.key).localeCompare(String(b.key)) || Number(a.eventId ?? 0) - Number(b.eventId ?? 0));
   return {
@@ -380,14 +439,14 @@ export function inspectState(state, { events } = {}) {
 }
 
 /**
- * The entry to use for one standard: by placement priority (operations, ledger
- * first, ledger last, event), newest event among events. `standard` may be the
- * bare name or `iface/v1/<name>`; `null` selects the bundle/v1 event.
+ * The entry to use for one standard: by PLACEMENT_PRIORITY (operations, spare
+ * slot [15], ledger first, ledger last, event), newest event among events.
+ * `standard` may be the bare name or `iface/v1/<name>`; `null` selects the
+ * bundle/v1 event.
  */
 export function selectEntry(entries, standard) {
   const want = standard === null ? null : parseName(ifaceName(standard));
   const candidates = entries.filter((e) => e.standard === want);
-  candidates.sort((a, b) => PLACEMENT_PRIORITY.indexOf(a.placement) - PLACEMENT_PRIORITY.indexOf(b.placement)
-    || Number(b.eventId ?? 0) - Number(a.eventId ?? 0));
+  candidates.sort((a, b) => rank(a) - rank(b) || Number(b.eventId ?? 0) - Number(a.eventId ?? 0));
   return candidates[0] ?? null;
 }

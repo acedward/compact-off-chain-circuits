@@ -161,6 +161,7 @@ async function stepCircuits() {
 
 async function stepBundle() {
   if (!record.address) throw new Error('no contract recorded: run the contract step first');
+  if (record.bundle) { log('bundle.already', { url: record.bundle.url, commitment: record.bundle.commitment }); return; }
   const { deployCheck } = await import(pathToFileURL(join(REPO, 'src', 'deployer.mjs')).href);
   const r = deployCheck({
     interfaceSrc: INTERFACE_SRC, interfaceOut: INTERFACE_OUT, fullOut: LIVE_OUT,
@@ -516,6 +517,7 @@ async function stepMinocrabContract() {
 async function stepMinocrabBundle() {
   const out = minocrabOut();
   if (!record.minocrab?.address) throw new Error('run minocrab-contract first');
+  if (record.minocrab.bundle) { log('minocrab.bundle.already', { url: record.minocrab.bundle.url, commitment: record.minocrab.bundle.commitment }); return; }
   if (!existsSync(join(V3_INTERFACE_OUT, 'keys'))) {
     execFileSync(process.env.COMPACT_BIN || 'compact', ['compile', '--feature-zkir-v3', INTERFACE_SRC, V3_INTERFACE_OUT], { stdio: ['ignore', 'pipe', 'inherit'] });
   }
@@ -606,6 +608,7 @@ async function stepRegBundles() {
   if (!reg?.address) throw new Error('run reg-contract first');
   const { deployCheck } = await import(pathToFileURL(join(REPO, 'src', 'deployer.mjs')).href);
   for (const [standard, s] of Object.entries(cfg.standards)) {
+    if (reg.bundles?.[standard]) { log('reg.bundle.already', { standard, ...reg.bundles[standard] }); continue; }
     const outDir = join(SITE_DIR, cfg.site, standard);
     const r = deployCheck({ interfaceSrc: s.interfaceSrc, interfaceOut: s.interfaceOut, fullOut: cfg.out, outDir, url: standardUrl(cfg, standard), address: reg.address, indexerUrl: profile.indexer });
     const payload = Buffer.from(r.payload);

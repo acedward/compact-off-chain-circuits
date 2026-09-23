@@ -8,6 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as rt from '@midnight-ntwrk/compact-runtime';
+import { asciiJson } from './registry.mjs';
 import { loadWrapper } from './load.mjs';
 
 /** Thrown when the circuit itself rejected the arguments (an `assert` failed). */
@@ -67,7 +68,7 @@ export function coerceArg(type, raw, label = 'argument') {
 export function describeResult(value) {
   if (value === undefined || value === null) return '[] (no value)';
   if (typeof value === 'bigint') return value.toString(10);
-  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'string') return asciiJson(value);   // a string from the chain: escaped, so it prints safely
   if (typeof value === 'boolean') return String(value);
   if (value instanceof Uint8Array) {
     const hex = Buffer.from(value).toString('hex');
@@ -101,9 +102,12 @@ export const bundleInfo = (bundleDir) =>
  * @param {Uint8Array|Buffer} o.stateBytes  serialized ContractState from the indexer
  * @param {string} o.circuitName
  * @param {string[]} [o.args]               raw CLI strings, coerced by contract-info types
+ * @param {Set<string>} [o.checked]         circuits whose verifier keys passed Level 2; when
+ *                                          given, any other circuit is refused before the
+ *                                          wrapper is loaded (src/verify.mjs always gives it)
  * @returns {Promise<{ value: any, text: string }>}
  */
-export async function executeCircuit({ bundleDir, stateBytes, circuitName, args = [] }) {
+export async function executeCircuit({ bundleDir, stateBytes, circuitName, args = [], checked }) {
   const info = bundleInfo(bundleDir);
 
   // A circuit that calls a witness takes a private input the consumer does not
@@ -119,6 +123,9 @@ export async function executeCircuit({ bundleDir, stateBytes, circuitName, args 
   const circuit = info.circuits.find((c) => c.name === circuitName);
   if (!circuit) {
     throw new Error(`circuit '${circuitName}' is not published by this bundle; it publishes ${info.circuits.map((c) => c.name).join(', ')}`);
+  }
+  if (checked && !checked.has(circuitName)) {
+    throw new Error(`circuit '${circuitName}' has no verifier key that passed Level 2, so nothing ties its code to the contract on chain; it was not executed`);
   }
   if (args.length !== circuit.arguments.length) {
     const sig = circuit.arguments.map((a) => `${a.name}: ${a.type['type-name']}`).join(', ');

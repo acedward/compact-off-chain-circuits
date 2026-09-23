@@ -66,11 +66,12 @@ A verifier key depends only on circuit logic and on the positions and types of t
 
 ## Verification
 
-Level 1: the commitment recomputed from `index.json` equals the published one, and each listed file matches its sha256 and size. Level 2: every shipped key equals the key the contract state stores under that entry point, and every circuit the bundle publishes that has an entry point on chain ships its key. Level 3: recompiling the listed interface source with the pinned compiler reproduces exactly the shipped keys and `index.js`. The README's [How to verify](../README.md#how-to-verify) gives the steps.
+Level 1: the commitment recomputed from `index.json` equals the published one, and each listed file matches its sha256 and size. Level 2: every shipped key equals the key the contract state stores under that entry point, and every circuit the bundle publishes that has an entry point on chain ships its key. Level 3: recompiling the listed interface source with the pinned compiler, without `COMPACT_PATH` and reading only files inside the bundle that the index lists (checked from the compiler's `--trace-search` output), reproduces exactly the shipped keys, `index.js` and `contract-info.json`. The README's [How to verify](../README.md#how-to-verify) gives the steps.
 
 ## Execution
 
 - Levels 2 and 3 and the circuit run on the private copy of the listed files. No bundle code runs during the checks: Level 2 reads the `expectedVk` table in `index.js` as text.
-- Only to execute a circuit whose key passed Level 2, and only after every requested level has passed, does the verifier import `index.js`, with its runtime import pinned to the verifier's own `@midnight-ntwrk/compact-runtime`.
+- Only to execute a circuit whose key passed Level 2, and only after every requested level has passed, does the verifier load `index.js`: in a fresh child process, with its runtime import pinned to the verifier's own `@midnight-ntwrk/compact-runtime`. The child returns one result and exits, and its output is discarded. It is not a sandbox: it runs with the permissions of whoever runs the verifier.
+- Arguments must fit the circuit's types exactly: `Bytes<N>` takes exactly 2N hex digits with an optional `0x`, `Uint` and `Field` a decimal integer in range, `Either` `key:<hex>` or `addr:<hex>`, and `Maybe` `none` or `some:<value>`. Nothing is padded or cut; an argument that does not fit is an input error.
 - It builds a circuit context over the contract state and calls the circuit, as midnight-js does before proving, and stops there.
 - Circuits that declare witnesses take private inputs, are not reads, and are refused. So are circuits without a checked key, such as pure circuits.

@@ -116,15 +116,17 @@ No compiler is needed.
 ### Level 3: the source regenerates them
 
 1. Take the interface source that the bundle's `package.json` names. It must be a file the index lists.
-2. Recompile it with the compiler version pinned in `package.json`.
-3. Compare the regenerated `.verifier` files and `index.js` with the shipped ones, byte for byte.
+2. Recompile it with the compiler version pinned in `package.json`, without your `COMPACT_PATH`. Every file the compiler reads must be in the bundle and listed in the index.
+3. Compare the regenerated `.verifier` files, `index.js` and `contract-info.json` with the shipped ones, byte for byte.
 4. Check that the recompile produces no key the bundle leaves out.
 
 This needs the `compact` toolchain.
 
 ### Run the circuit
 
-Once the requested levels pass, `verify` runs the circuit through the bundle's wrapper against the contract state, and prints the result or the assertion that failed. It runs only circuits whose key passed Level 2. A pure circuit has no key, so no level can verify it, and `verify` refuses it; you can still call it from the published code yourself.
+Once the requested levels pass, `verify` runs the circuit through the bundle's wrapper against the contract state, in a separate process, and prints the result or the assertion that failed. It runs only circuits whose key passed Level 2: the key ties a circuit to the chain, and Level 3 ties its code. A pure circuit has no key, so no level can verify it, and `verify` refuses it; you can still call it from the published code yourself.
+
+Arguments must fit the circuit's types exactly; nothing is padded or cut. A `Bytes<32>` key is 64 hex digits, with an optional `0x`, and an `Either` takes `key:<hex>` or `addr:<hex>`.
 
 `--level` takes 2 (the default) or 3. Level 1 always runs with Level 2.
 
@@ -132,7 +134,7 @@ Once the requested levels pass, `verify` runs the circuit through the bundle's w
 |---|---|
 | 0 | verified, and the circuit, if one was named, returned a value |
 | 1 | a level failed, or the named circuit was not run |
-| 2 | usage error |
+| 2 | usage error, including arguments that do not fit the circuit |
 | 3 | verified, but the circuit rejected the arguments |
 
 ## How it works
@@ -141,7 +143,7 @@ Once the requested levels pass, `verify` runs the circuit through the bundle's w
 - **A bundle is a folder of files.** `index.json` lists each file with its sha256 and size: the partial source, one verifier key per published circuit, the compiled wrapper `index.js`, the compiler's `contract-info.json`, and a `package.json` that pins the compiler version.
 - **The commitment covers every listed file.** Changing, adding or removing any file changes it.
 - **A partial source compiles to the deployed keys.** A circuit's verifier key depends on its logic and on where the ledger fields it reads sit, not on any name. So an interface that imports the deployed contract's modules, and exports only some circuits, gets the same keys.
-- **Reads run locally.** The verifier calls the circuit through the wrapper against the contract state, as midnight-js does before proving, and stops there: no transaction, no proof.
+- **Reads run locally.** The verifier calls the circuit through the wrapper against the contract state, in a separate process, as midnight-js does before proving, and stops there: no transaction, no proof.
 
 The exact formats and rules are in [docs/FORMAT.md](docs/FORMAT.md).
 
@@ -173,7 +175,7 @@ You need `compact` 0.34.0 and Node 20 or later. The example contracts take sever
 npm ci
 scripts/build.sh                  # compiles 5 example contracts and 4 interfaces, then checks keys
 node scripts/check-keys.mjs       # 25 IDENTICAL, 0 not identical
-npm test                          # 322 tests, about a minute and a half
+npm test                          # 347 tests, about a minute and a half
 ```
 
 The test data are OpenZeppelin's three token contracts and two registry examples, with deployments simulated locally: the contract state with its verifier keys installed, as a real deploy does. The tests check these claims (files in `test/`):
@@ -189,7 +191,7 @@ The test data are OpenZeppelin's three token contracts and two registry examples
 | The footprint is small | one 288-byte event on chain; a one-circuit bundle's compiled files fit in 64 KB | `size` |
 | Entries are found from the address alone | the ledger layout rules and key effects; discovery on flat and nested layouts, on events and on two real Stagenet states; no false positives; the index-15 state | `placement-layout`, `placement-keys`, `discover`, `events`, `operations`, `slot15`, `verify-standard`, `indexer` |
 | ZKIR v3 bundles verify | the compiler flag is recorded, and passed, only when the keys need it | `zkir-v3` |
-| The audit findings stay fixed | one case per finding, which failed before its fix | `audit-fixes` |
+| The audit findings stay fixed | one case per finding of both audits, which failed before its fix | `audit-fixes`, `reaudit-fixes` |
 
 To run one verification by hand, on the NFT example:
 
@@ -201,7 +203,7 @@ node src/verify.mjs --bundle bundle/nft \
   --circuit tokenURI --args 1 --level 3
 ```
 
-It prints two `L1 OK` lines (the index, then its 16 files), five `L2 OK`, six `L3 OK` and `tokenURI(1) = "https://nft.example/meta/1.json"`. Use `fungible` instead of `nft` to read `name`, `symbol`, `decimals` and `totalSupply`, or `multi` to read `uri`. `--args 999` shows a failed assertion (exit 3). Changing one byte of any bundle file fails Level 1 (exit 1).
+It prints two `L1 OK` lines (the index, then its 16 files), five `L2 OK`, seven `L3 OK` and `tokenURI(1) = "https://nft.example/meta/1.json"`. Use `fungible` instead of `nft` to read `name`, `symbol`, `decimals` and `totalSupply`, or `multi` to read `uri`. `--args 999` shows a failed assertion (exit 3). Changing one byte of any bundle file fails Level 1 (exit 1).
 
 To check the HTTP path, serve the bundles with any static server and point `verify` at the index. It fetches the index and its 16 files, 17 requests in all, before running the circuit:
 
@@ -237,7 +239,7 @@ live/stagenet/                                the Stagenet deployments, their sc
 - **Level 1** proves the bundle is the one committed to, not who committed it. Unless the contract restricts `publishBundle`, anyone can publish a newer bundle.
 - **Level 2** proves the bundle's keys are the deployed keys. It does not prove that the source or `index.js` match them.
 - **Level 3** proves the published source compiles to those keys and to that `index.js`. Run it once per commitment.
-- **Bundle code is untrusted.** Nothing from the bundle runs during the checks. Running a circuit runs the bundle's `index.js`, which below Level 3 is the entry writer's code. If you do not trust them, use Level 3 or run `verify` isolated.
+- **Bundle code is untrusted.** Nothing from the bundle runs during the checks. A circuit runs in a separate process, so it cannot change the verifier or a later verification. That process is not a sandbox: below Level 3 it runs the entry writer's code with your permissions. If you do not trust them, use Level 3 or run `verify` isolated.
 - **Only listed files are used.** The verifier downloads only what `index.json` lists, into a private folder, and pins the wrapper's runtime to its own. Extra files a host serves, such as a planted `node_modules`, are ignored.
 - **The commitment is binding**, because its group-hash points have unknown discrete logarithms. Index sizes only bound downloads; every file's sha256 is checked.
 - **The indexer is trusted** to serve the real contract state. Run your own to remove that trust.
@@ -286,7 +288,7 @@ node src/verify.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/gra
   --circuit name --level 3
 ```
 
-It prints two `L1 OK`, six `L2 OK`, seven `L3 OK` and `name() = "Off-Chain Reads Token"`. The other reads return `symbol() = "OCRT"`, `decimals() = 18` and `totalSupply() = 1000000000000000000000000`. The whole supply was minted to a keyless demo holder, so `--circuit balanceOf --args key:0x13f03a2916c2bbb04b050ffb5061187386c73af8ba57bf70c7ddf1fa8c2a005a` returns the same amount. Level 3 needs `compact` 0.34.0; without it, drop `--level 3`.
+It prints two `L1 OK`, six `L2 OK`, eight `L3 OK` and `name() = "Off-Chain Reads Token"`. The other reads return `symbol() = "OCRT"`, `decimals() = 18` and `totalSupply() = 1000000000000000000000000`. The whole supply was minted to a keyless demo holder, so `--circuit balanceOf --args key:0x13f03a2916c2bbb04b050ffb5061187386c73af8ba57bf70c7ddf1fa8c2a005a` returns the same amount. Level 3 needs `compact` 0.34.0; without it, drop `--level 3`.
 
 The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagenet/contracts/ERC20Live.compact). It imports the same module as the tested example, so its keys are the tested ones. It was deployed with `publishBundle` and the six reads only, because Stagenet's limit of 50,000 bytes written per block rejects all 19 circuits of the full example in one transaction. The maintenance authority then added `transfer`, `approve` and `transferFrom`. Every transaction is recorded in [live/stagenet/deployment.json](live/stagenet/deployment.json), and [live/stagenet](live/stagenet) holds the scripts that made it and a copy of the published bundle.
 
@@ -331,7 +333,7 @@ A sixth deployment, `5d82194fac77216360bb4be5f3879007b46858877df6d9a2c7769d2e96e
 - Node 24.9.0 (the package needs Node 20 or later)
 - the public Stagenet indexer, API v4 (reading events needs indexer 4.4.0 or later, whose contract-event API is marked beta)
 
-Checking keys and running reads needs only the contract state. Contracts compiled with `--feature-zkir-v3` work too. Keys were checked to be reproducible on exactly this toolchain; check again after upgrading.
+Checking keys and running reads needs only the contract state. Contracts compiled with `--feature-zkir-v3` work too. Level 3 relies on the compiler's `--trace-search` option, which 0.34.0 has. Keys were checked to be reproducible on exactly this toolchain; check again after upgrading.
 
 ## License
 

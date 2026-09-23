@@ -6,75 +6,7 @@ A contract commits to a small bundle: a partial Compact source containing only t
 
 The examples apply the pattern to OpenZeppelin's FungibleToken, NonFungibleToken and MultiToken, used unmodified, to show it is compatible with that well-known implementation and makes metadata such as `name`, `symbol`, `decimals`, `tokenURI` and `uri` readable. Targets Midnight 2.x (Ledger v9).
 
-## Live on Stagenet
-
-The ERC-20 example is deployed on Midnight Stagenet and its interface bundle is published. Anyone can check it with the verifier in this repository.
-
-| | |
-|---|---|
-| Contract address | `294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913` |
-| Bundle URL | https://compact-off-chain-circuits.pages.dev/erc20/index.json |
-| Commitment | `cebd25ff611b7b3416a3bf3bb66a7ab64396806198c0f06d51b9114e15335eb1` |
-| `publishBundle` transaction | `7bdbf4b525c497c7e082557e6b3616def8439384a51ef6e9b34c478a36dbc63e`, block 582728 |
-| Deploy transaction | `708e845bbb787014a73ad8a5e5c7c5ab7a3638f40feba3b140ab299356a976e0`, block 582583 |
-| Indexer | https://indexer.stagenet.shielded.tools/api/v4/graphql |
-
-The files listed in `index.json`, with paths relative to the bundle URL:
-
-```
-README.md
-package.json
-out/compiler/contract-info.json
-out/contract/index.d.ts
-out/contract/index.js
-out/contract/package.json
-out/keys/allowance.verifier
-out/keys/balanceOf.verifier
-out/keys/decimals.verifier
-out/keys/name.verifier
-out/keys/symbol.verifier
-out/keys/totalSupply.verifier
-src/OffChainInterface.compact
-src/integrations/openzeppelin/FungibleTokenReadable.Interface.compact
-src/integrations/openzeppelin/FungibleTokenReadable.compact
-src/vendor/openzeppelin/token/FungibleToken.compact
-src/vendor/openzeppelin/utils/Utils.compact
-```
-
-Check it from a clone, after `npm ci`:
-
-```sh
-node src/verify.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
-  --address 294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913 \
-  --circuit name --level 3
-```
-
-It prints two `L1 OK`, six `L2 OK`, seven `L3 OK` and `name() = "Off-Chain Reads Token"`. The other reads return `symbol() = "OCRT"`, `decimals() = 18` and `totalSupply() = 1000000000000000000000000`. The whole supply was minted to a keyless demo holder, so `--circuit balanceOf --args key:0x13f03a2916c2bbb04b050ffb5061187386c73af8ba57bf70c7ddf1fa8c2a005a` returns the same amount. Level 3 needs `compact` 0.34.0; without it, drop `--level 3`.
-
-The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagenet/contracts/ERC20Live.compact). It imports the same module as the tested example, so its keys are the tested ones. It was deployed with `publishBundle` and the six reads only, because Stagenet's limit of 50,000 bytes written per block rejects all 19 circuits of the full example in one transaction. The maintenance authority then added `transfer`, `approve` and `transferFrom`. Every transaction is recorded in [live/stagenet/deployment.json](live/stagenet/deployment.json), and [live/stagenet](live/stagenet) holds the scripts that made it and a copy of the published bundle.
-
-### Interfaces advertised in the contract state
-
-The ERC-20 contract and four more deployments show the other places a contract can advertise its interfaces, each with the standards `erc20` and `erc20-metadata`. [docs/PLACEMENTS.md](docs/PLACEMENTS.md) compares them.
-
-| Contract | Where the entries are |
-|---|---|
-| `294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913` (above) | `erc20` in the operations metadata, and `erc20-metadata` in a per-standard event; the maintenance authority added both after deployment |
-| `2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115` | a registry map, the contract's last ledger field |
-| `84a104e1dbfab382ba9088211b4ed6fd0a5ca84460f0b7fc07d7f675a929c847` | the operations metadata; the maintenance authority was then handed to an empty committee, so the entries can no longer change |
-| `6bd2c5be43209ab14380a7f764d9c1823c23138cfb70f7bb0e8c6a06ab7bbd4a` | a registry map at index 15 of the state's root, written at deploy |
-| `721577875316525d6ef086e174d9bc3c8f0188f7fde73cd72a0bdbd310cf6ea7` | a registry map, the contract's first ledger field |
-
-```sh
-node src/discover.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
-  --address 2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115
-node src/verify.mjs --standard erc20-metadata --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
-  --address 2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115 --circuit symbol --level 3
-```
-
-`discover` lists every entry with the place it came from. `verify --standard` takes the entry for one standard and runs the three levels; here it prints `symbol() = "OCRR"`. All their entries verify to Level 3.
-
-A sixth deployment, `5d82194fac77216360bb4be5f3879007b46858877df6d9a2c7769d2e96ea0692`, is the ERC-20 example compiled with `--feature-zkir-v3`, whose `publishBundle` circuit comes from MinoCrab, a Rust library for Midnight circuits. It proves with a 1.77 MB key instead of compactc's 56.6 MB. Its bundle event verifies to Level 3 like the others; see [docs/PLACEMENTS.md](docs/PLACEMENTS.md#minocrab).
+The ERC-20 example is deployed on Midnight Stagenet, and its bundle is published at https://compact-off-chain-circuits.pages.dev/erc20/index.json, a real `index.json` to look at. [Live on Stagenet](#live-on-stagenet) lists that contract and five more, with their commitments and the commands to verify them.
 
 ## How to use
 
@@ -269,13 +201,83 @@ live/stagenet/                                the Stagenet deployments, their sc
 - The state is trusted as the indexer serves it. Run your own indexer to remove that trust.
 - Unpublished circuits keep their bodies private, but every entry point name and verifier key is visible in the contract state. `publishBundle` has the same key in every contract, because it reads no ledger slot.
 
+## Live on Stagenet
+
+The ERC-20 example is deployed on Midnight Stagenet and its interface bundle is published. Anyone can check it with the verifier in this repository.
+
+| | |
+|---|---|
+| Contract address | `294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913` |
+| Bundle URL | https://compact-off-chain-circuits.pages.dev/erc20/index.json |
+| Commitment | `cebd25ff611b7b3416a3bf3bb66a7ab64396806198c0f06d51b9114e15335eb1` |
+| `publishBundle` transaction | `7bdbf4b525c497c7e082557e6b3616def8439384a51ef6e9b34c478a36dbc63e`, block 582728 |
+| Deploy transaction | `708e845bbb787014a73ad8a5e5c7c5ab7a3638f40feba3b140ab299356a976e0`, block 582583 |
+| Indexer | https://indexer.stagenet.shielded.tools/api/v4/graphql |
+
+The files listed in `index.json`, with paths relative to the bundle URL:
+
+```
+README.md
+package.json
+out/compiler/contract-info.json
+out/contract/index.d.ts
+out/contract/index.js
+out/contract/package.json
+out/keys/allowance.verifier
+out/keys/balanceOf.verifier
+out/keys/decimals.verifier
+out/keys/name.verifier
+out/keys/symbol.verifier
+out/keys/totalSupply.verifier
+src/OffChainInterface.compact
+src/integrations/openzeppelin/FungibleTokenReadable.Interface.compact
+src/integrations/openzeppelin/FungibleTokenReadable.compact
+src/vendor/openzeppelin/token/FungibleToken.compact
+src/vendor/openzeppelin/utils/Utils.compact
+```
+
+Check it from a clone, after `npm ci`:
+
+```sh
+node src/verify.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
+  --address 294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913 \
+  --circuit name --level 3
+```
+
+It prints two `L1 OK`, six `L2 OK`, seven `L3 OK` and `name() = "Off-Chain Reads Token"`. The other reads return `symbol() = "OCRT"`, `decimals() = 18` and `totalSupply() = 1000000000000000000000000`. The whole supply was minted to a keyless demo holder, so `--circuit balanceOf --args key:0x13f03a2916c2bbb04b050ffb5061187386c73af8ba57bf70c7ddf1fa8c2a005a` returns the same amount. Level 3 needs `compact` 0.34.0; without it, drop `--level 3`.
+
+The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagenet/contracts/ERC20Live.compact). It imports the same module as the tested example, so its keys are the tested ones. It was deployed with `publishBundle` and the six reads only, because Stagenet's limit of 50,000 bytes written per block rejects all 19 circuits of the full example in one transaction. The maintenance authority then added `transfer`, `approve` and `transferFrom`. Every transaction is recorded in [live/stagenet/deployment.json](live/stagenet/deployment.json), and [live/stagenet](live/stagenet) holds the scripts that made it and a copy of the published bundle.
+
+### Interfaces advertised in the contract state
+
+The ERC-20 contract and four more deployments show the other places a contract can advertise its interfaces, each with the standards `erc20` and `erc20-metadata`. [docs/PLACEMENTS.md](docs/PLACEMENTS.md) compares them.
+
+| Contract | Where the entries are |
+|---|---|
+| `294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913` (above) | `erc20` in the operations metadata, and `erc20-metadata` in a per-standard event; the maintenance authority added both after deployment |
+| `2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115` | a registry map, the contract's last ledger field |
+| `84a104e1dbfab382ba9088211b4ed6fd0a5ca84460f0b7fc07d7f675a929c847` | the operations metadata; the maintenance authority was then handed to an empty committee, so the entries can no longer change |
+| `6bd2c5be43209ab14380a7f764d9c1823c23138cfb70f7bb0e8c6a06ab7bbd4a` | a registry map at index 15 of the state's root, written at deploy |
+| `721577875316525d6ef086e174d9bc3c8f0188f7fde73cd72a0bdbd310cf6ea7` | a registry map, the contract's first ledger field |
+
+```sh
+node src/discover.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
+  --address 2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115
+node src/verify.mjs --standard erc20-metadata --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
+  --address 2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115 --circuit symbol --level 3
+```
+
+`discover` lists every entry with the place it came from. `verify --standard` takes the entry for one standard and runs the three levels; here it prints `symbol() = "OCRR"`. All their entries verify to Level 3.
+
+A sixth deployment, `5d82194fac77216360bb4be5f3879007b46858877df6d9a2c7769d2e96ea0692`, is the ERC-20 example compiled with `--feature-zkir-v3`, whose `publishBundle` circuit comes from MinoCrab, a Rust library for Midnight circuits. It proves with a 1.77 MB key instead of compactc's 56.6 MB. Its bundle event verifies to Level 3 like the others; see [docs/PLACEMENTS.md](docs/PLACEMENTS.md#minocrab).
+
 ## Limitations
 
 - In an event, the URL is at most 224 bytes. The other placements have no such limit.
 - Each bundle version costs one transaction with one proof after deployment, because constructors cannot emit. The prover key for `publishBundle` is about 67 MB, larger than any token circuit's, because the 256-byte payload is decomposed byte by byte.
 - Circuits with witnesses are refused, and so are circuits with no verifier key on chain, such as pure ones. Reads of `boundedMerkleTree` slots are untested.
 - The verifier sets no timeout and no limit on the number of files. Read What to expect before running it unattended.
-- Verified live on Stagenet for the ERC-20 example, all six places a contract can advertise its entries, and a MinoCrab-proven event (see Live on Stagenet). The test suite builds states locally, with verifier keys installed the way a deployment installs them.
+- Verified live on Stagenet for the ERC-20 example, all six places a contract can advertise its entries, and a MinoCrab-proven event (see [Live on Stagenet](#live-on-stagenet)). The test suite builds states locally, with verifier keys installed the way a deployment installs them.
 
 ## Compatibility
 

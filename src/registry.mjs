@@ -16,7 +16,9 @@
 //   ledger-first  a Map<Bytes<32>, InterfaceRef> that is the state's first leaf,
 //                 i.e. ledger field 0 (compact/registry/InterfaceRegistry, P3)
 //   ledger-last   the same map as the state's last leaf, i.e. the last ledger
-//                 field (compact/templates/RegistryAtEnd.template.compact, P4)
+//                 field (compact/templates/RegistryAtEnd.template.compact, P4),
+//                 or root index 15 when a deployer put it there (src/slot15.mjs,
+//                 P5; such entries also carry `spareSlot: true`)
 //   event         the newest Misc event per name: iface/v1/<standard> (P1) or
 //                 bundle/v1 (P0), payload = commitment ++ url
 //
@@ -36,6 +38,9 @@ export const IFACE_MAGIC = 'iface/v1\n';
 export const BUNDLE_NAME = 'bundle/v1';
 export const KEY_BYTES = 32;
 export const MAX_STANDARD_BYTES = KEY_BYTES - IFACE_PREFIX.length; // 23
+
+/** Root index 15: never used by compactc, allowed by Ledger v9 (placement P5). */
+export const SPARE_ROOT_SLOT = 15;
 
 /** `selectEntry` preference: the first placement that has the standard wins. */
 export const PLACEMENT_PRIORITY = ['operations', 'ledger-first', 'ledger-last', 'event'];
@@ -113,11 +118,18 @@ function checkRef(ref, where) {
   return { commitment: ref.commitment.toLowerCase(), url: ref.url };
 }
 
+/**
+ * `{ commitment: <64 lowercase hex>, url }` from a commitment given as hex or
+ * 32 bytes and a non-empty URL; throws otherwise.
+ */
+export function normalizeRef({ commitment, url } = {}, where = 'interface entry') {
+  const c = typeof commitment === 'string' ? commitment.replace(/^0x/i, '') : (commitment?.length === KEY_BYTES ? hex(commitment) : '');
+  return checkRef({ commitment: c, url }, where);
+}
+
 /** Operations-metadata IR bytes: `"iface/v1\n"` followed by the JSON value. */
-export function ifaceBlob({ commitment, url }) {
-  const c = typeof commitment === 'string' ? commitment : hex(commitment);
-  const ref = checkRef({ commitment: c, url }, 'interface entry');
-  return Buffer.concat([Buffer.from(IFACE_MAGIC), Buffer.from(JSON.stringify(ref))]);
+export function ifaceBlob(ref) {
+  return Buffer.concat([Buffer.from(IFACE_MAGIC), Buffer.from(JSON.stringify(normalizeRef(ref)))]);
 }
 
 /** The end (exclusive) of the JSON object starting at `text[0]`, or -1. */
@@ -279,13 +291,16 @@ export function fromLedger(state) {
       leaves.last = { ...leaves.first, same: true };
       continue;
     }
-    leaves[side] = { type: leaf.type, path: leaf.path };
+    // Root index 15 exists only in a state a deployer extended (P5, src/slot15.mjs):
+    // compactc never makes an array longer than 15.
+    const spare = side === 'last' && leaf.path.length === 1 && leaf.path[0] === SPARE_ROOT_SLOT ? { spareSlot: true } : {};
+    leaves[side] = { type: leaf.type, path: leaf.path, ...spare };
     if (leaf.type !== 'map') continue;
     const r = readRegistryMap(leaf.value.asMap());
     leaves[side].registry = r.registry;
     if (!r.registry) continue;
-    for (const e of r.entries) entries.push({ standard: e.standard, key: e.key, placement, commitment: e.commitment, url: e.url, path: leaf.path });
-    for (const p of r.problems) problems.push({ placement, ...p, path: leaf.path });
+    for (const e of r.entries) entries.push({ standard: e.standard, key: e.key, placement, commitment: e.commitment, url: e.url, path: leaf.path, ...spare });
+    for (const p of r.problems) problems.push({ placement, ...p, path: leaf.path, ...spare });
   }
   return { entries, problems, leaves };
 }

@@ -388,7 +388,7 @@ export function printReport(r) {
   }
   if (r.interface) {
     const i = r.interface;
-    const at = i.placement === 'event' ? `event id ${i.eventId}` : i.path ? `path [${i.path.join('][')}]` : `entry point ${i.entryPoint}`;
+    const at = i.placement === 'event' ? `event id ${i.eventId}` : i.spareSlot ? 'spare slot [15]' : i.path ? `path [${i.path.join('][')}]` : `entry point ${i.entryPoint}`;
     console.log(`interface   : ${i.key} from ${i.placement} (${at})${i.alternatives.length ? `; also in ${i.alternatives.map((a) => a.placement).join(', ')}` : ''}`);
     for (const a of i.alternatives) if (a.commitment !== i.commitment || a.url !== i.url) console.log(`              WARN ${a.placement} holds a different entry: ${a.commitment} ${a.url}`);
   }

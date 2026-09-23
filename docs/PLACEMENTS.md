@@ -31,21 +31,23 @@ node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql 
 
 ## Comparison
 
-| | P0 `bundle/v1` event | P1 event per standard | P2 operations metadata | P3 registry first | P4 registry last |
-|---|---|---|---|---|---|
-| Lives in | a `Misc` event | a `Misc` event | an entry point `iface/v1/<standard>` carrying IR | ledger field 0 | the last ledger field |
-| Code | `compact/OffChainInterface.compact` | `compact/registry/InterfaceEvents.compact` | none (maintenance update) | `compact/registry/InterfaceRegistry.compact`, imported first | `compact/templates/RegistryAtEnd.template.compact` |
-| Standards per contract | one | many | many | many | many |
-| Found from | indexer events | indexer events | state | state | state |
-| Update / remove | supersede only | supersede only | replace or remove the entry point | `publishInterface` / `removeInterface` | `publishInterface` / `removeInterface` |
-| Who can write | any caller, unless the contract restricts it | any caller, unless restricted | the maintenance authority only | any caller, unless restricted | any caller, unless restricted |
-| Other circuits' keys | unchanged | unchanged | unchanged | all ledger reads change (up to 15 fields) | unchanged up to 15 fields |
-| Publishing circuit prover key | 67,427,609 B | 67,441,880 B | no circuit, no proof | 279,188 B | 279,217 B |
-| Modelled bytes written (net) | 539 (0) | 539 (0) | not measured locally | 1,402 (+364) first entry | 1,402 (+364) first entry |
-| URL limit | 224 bytes | 224 bytes | none found (entry up to 10,485,760 B on Stagenet) | none | none |
-| Usable on an already deployed contract | yes, if it has the circuit (1) | yes, if it has the circuit (1) | yes | no, changes the layout | no, changes the layout |
+| | P0 `bundle/v1` event | P1 event per standard | P2 operations metadata | P3 registry first | P4 registry last | P5 spare slot 15 |
+|---|---|---|---|---|---|---|
+| Lives in | a `Misc` event | a `Misc` event | an entry point `iface/v1/<standard>` carrying IR | ledger field 0 | the last ledger field | root index 15, which compactc never uses |
+| Code | `compact/OffChainInterface.compact` | `compact/registry/InterfaceEvents.compact` | none (maintenance update) | `compact/registry/InterfaceRegistry.compact`, imported first | `compact/templates/RegistryAtEnd.template.compact` | `src/slot15.mjs` (patches the initial state) |
+| Standards per contract | one | many | many | many | many | many |
+| Found from | indexer events | indexer events | state | state | state | state |
+| Update / remove | supersede only | supersede only | replace or remove the entry point | `publishInterface` / `removeInterface` | `publishInterface` / `removeInterface` | neither, after deployment (2) |
+| Who can write | any caller, unless the contract restricts it | any caller, unless restricted | the maintenance authority only | any caller, unless restricted | any caller, unless restricted | the deployer, once |
+| Other circuits' keys | unchanged | unchanged | unchanged | all ledger reads change (up to 15 fields) | unchanged up to 15 fields | unchanged, for any number of fields |
+| Publishing circuit prover key | 67,427,609 B | 67,441,880 B | no circuit, no proof | 279,188 B | 279,217 B | no circuit, no proof (part of the deploy) |
+| Modelled bytes written (net) | 539 (0) | 539 (0) | not measured locally | 1,402 (+364) first entry | 1,402 (+364) first entry | not measured locally; serialized state +976 B for two entries |
+| URL limit | 224 bytes | 224 bytes | none found (entry up to 10,485,760 B on Stagenet) | none | none | none |
+| Usable on an already deployed contract | yes, if it has the circuit (1) | yes, if it has the circuit (1) | yes | no, changes the layout | no, changes the layout | no, deploy time only |
 
 (1) The circuit's key is the same in every contract, so a maintenance authority could probably add it to a deployed contract, as 00021 did for `transfer`. This was not tried.
+
+(2) No compactc circuit can address root index 15, and maintenance updates change operations, not state. To supersede a P5 entry, add a P2 entry for the same standard, which discovery prefers.
 
 "Modelled bytes written" is the `gasCost` the runtime reports for a local call with its default cost model, on the populated registry examples. The event circuits write and delete the same 539 bytes, so an event changes no contract state. A second registry entry costs 1,932 bytes (+530), an update 1,940 (+8), and a removal 1,410 (−530). Stagenet's cost model may differ.
 
@@ -117,11 +119,44 @@ node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql 
 - A contract with no fields of its own and no inline modules can instead import `InterfaceRegistry` last: the last file import is the last field.
 - There is no access control. The commented check in the template compiles once uncommented, and a test checks this.
 
+## P5 — spare slot 15
+
+**Where it lives.** Index 15 of the state's root array. compactc puts at most 15 entries in any array, so its root has at most 15 entries in every contract, whatever the field count. Ledger v9 allows 16 entries per array and checks that limit when a state is deserialized. The deployer builds the initial state with the unused root indices set to `null` and a registry map at `[15]`, in the same encoding as P3 and P4. `src/slot15.mjs` provides `withSpareSlotRegistry(state, refs)`, which returns the patched state, and `interfaceMapValue(refs)`, which returns the map on its own. Both need only `@midnight-ntwrk/compact-runtime`. The map is built with the runtime type descriptors that compactc's generated code uses. A test checks that it is byte-identical to the map `publishInterface` writes for the same entries.
+
+**How to deploy it.** midnight-js `deployContract` builds the state from the constructor and cannot add the slot, so the deploy transaction is built by hand:
+
+```js
+const data = await createUnprovenDeployTx(providers, { compiledContract, args, signingKey });   // midnight-js
+const patched = withSpareSlotRegistry(data.public.initialContractState.serialize(), {
+  erc20: { commitment: '<hex>', url: 'https://…/erc20/index.json' },
+  'erc20-metadata': { commitment: '<hex>', url: 'https://…/erc20-metadata/index.json' },
+});
+const state = ledger.ContractState.deserialize(patched.serialize());                          // ledger-v9
+const tx = ledger.Transaction.fromParts(networkId, undefined, undefined,
+  ledger.Intent.new(ttl).addDeploy(new ledger.ContractDeploy(state)));
+// submit tx, then store signingKey for the new address, as deployContract would
+```
+
+**How to find it.** `[15]` is the root's last entry, so it is the state's last leaf, where discovery already looks. `discover` reports the entries as `ledger-last`, so the priority order is unchanged. They carry `spareSlot: true`, and `discover` and `verify` print `spare slot [15]`. The label is exact, because only a deployer-extended root has a 16th entry.
+
+**Key effect.** None, for any number of fields. No circuit changes, and no compactc circuit reads or writes `[15]`: `check-keys` still reports 25 IDENTICAL. On the extended state, the fungible example's seven reads give the same results as on the original state, and a write circuit keeps the root at 16 entries. The same holds for reads of field 0 and field 19 of a 20-field contract, whose root `[[5],[15]]` is padded to 16 entries. Contracts with 15 fields and with no fields were also tested.
+
+**Cost.** No circuit and no proof: the map is part of the deploy transaction. On the fungible example the serialized state grows by 976 bytes for two entries with URLs of about 70 bytes, including 8 `null`s of padding.
+
+**Update authority.** Only the deployer, once.
+
+**Caveats.**
+- Deploy time only. Arrays keep their size after deployment, no compactc circuit can address `[15]`, and maintenance updates change operations, not state, so an entry can be neither updated nor removed. To supersede one, add a P2 entry for the same standard. A MinoCrab contract can declare a slot at that path with `LedgerMap::at_path(&[15])` and write it from a circuit.
+- It needs a custom deploy (see above).
+- It relies on compactc keeping arrays at most 15 wide, which is true for compact 0.34.0. A compiler that filled 16-wide arrays would put a field at `[15]`.
+- The JavaScript binding's `StateValue.arrayPush` refuses a 16th entry, so the helper builds the root with `StateValue.decode`, which the runtime types as internal. The binding also builds a 17-entry array in memory, but `ContractState.deserialize` rejects it. The helper refuses a root that already has 16 entries.
+- Combined with P4, the P4 map is no longer the last leaf, so discovery reports only `[15]`.
+
 ## Studied, not delivered
 
-**A declared or deterministic position.** Compact has no keyword that places a ledger field at a chosen slot. The order is fixed by these rules: file imports first in import order, pre-order inside modules, then the contract's own declarations in the order written. Import order is the only control, and it gives exactly one fixed position that does not depend on the contract: field 0, which is P3. The last field (P4) also needs no layout knowledge, but it depends on nothing being declared after it.
+**A declared or deterministic position.** Compact has no keyword that places a ledger field at a chosen slot. The order is fixed by these rules: file imports first in import order, pre-order inside modules, then the contract's own declarations in the order written. Within compactc, import order is the only control, and it gives exactly one fixed position that does not depend on the contract: field 0, which is P3. The last field (P4) also needs no layout knowledge, but it depends on nothing being declared after it. Outside compactc's layout there is one more fixed position: root `[15]`, the same path in every compactc contract and also the state's last leaf. A deployer can claim it at deploy time (P5), and a MinoCrab contract can declare it.
 
-**Empty space.** There is none. Arrays are sized exactly. The live ERC-20 state is an array of exactly 7 entries, and generated contracts of 1 to 250 fields have exactly one leaf per field. The VM keeps arrays at a fixed size, so no spare slot exists to write into.
+**Empty space.** compactc allocates no spare slot: arrays are sized exactly. The live ERC-20 state is an array of exactly 7 entries, and generated contracts of 1 to 250 fields have exactly one leaf per field. The VM keeps arrays at a fixed size, so nothing can be added after deployment. One index is never used, though: compactc fills at most 15 entries of any array, while Ledger v9 allows 16. So a deployer can claim root index 15 at deploy time, which is P5.
 
 ## Layout rules
 

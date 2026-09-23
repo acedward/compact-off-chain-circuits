@@ -56,8 +56,9 @@ const USAGE = `coc-discover — list the interfaces a contract advertises and wh
   --json              machine-readable output
 
 Placements: operations (entry point iface/v1/<standard> with IR), ledger-first
-(the first ledger field is the registry map), ledger-last (the last field is),
-event (newest Misc event per name; bundle/v1 is the default standard).
+(the first ledger field is the registry map), ledger-last (the last field is,
+or the spare root slot [15] a deployer filled), event (newest Misc event per
+name; bundle/v1 is the default standard).
 Exit status: 0 at least one entry found; 1 none found; 2 usage or input error.
 `;
 
@@ -91,7 +92,7 @@ export function readStateArg(s) {
 
 const short = (h) => `${h.slice(0, 8)}…${h.slice(-6)}`;
 const where = (e) => e.placement === 'event' ? `event id ${e.eventId}${e.supersededIds?.length ? ` (supersedes ${e.supersededIds.join(', ')})` : ''}`
-  : e.path ? `path [${e.path.join('][')}]` : e.entryPoint ? 'entry point' : '';
+  : e.spareSlot ? 'spare slot [15]' : e.path ? `path [${e.path.join('][')}]` : e.entryPoint ? 'entry point' : '';
 
 export function printInspection(r) {
   if (r.source.from === 'indexer') {
@@ -101,7 +102,7 @@ export function printInspection(r) {
   } else {
     console.log(`state     : supplied directly; ${r.source.events} Misc events supplied`);
   }
-  const leaf = (l) => l.type === 'none' ? 'empty ledger' : l.same ? 'same leaf as the first' : `${l.type} at [${l.path.join('][')}]${l.type === 'map' ? (l.registry ? ', a registry' : ', not a registry') : ''}`;
+  const leaf = (l) => l.type === 'none' ? 'empty ledger' : l.same ? 'same leaf as the first' : `${l.type} at ${l.spareSlot ? 'spare slot ' : ''}[${l.path.join('][')}]${l.type === 'map' ? (l.registry ? ', a registry' : ', not a registry') : ''}`;
   console.log(`ledger    : first leaf ${leaf(r.leaves.first)}; last leaf ${leaf(r.leaves.last)}`);
   if (r.entries.length === 0) {
     console.log('none found: this contract advertises no interface in any placement');

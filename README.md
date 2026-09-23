@@ -6,6 +6,53 @@ A contract commits once, in a single event, to a small bundle: a partial Compact
 
 The examples apply the pattern to OpenZeppelin's FungibleToken, NonFungibleToken and MultiToken, used unmodified, to show it is compatible with that well-known implementation and makes metadata such as `name`, `symbol`, `decimals`, `tokenURI` and `uri` readable. Targets Midnight 2.x (Ledger v9).
 
+## Live on Stagenet
+
+The ERC-20 example is deployed on Midnight Stagenet and its interface bundle is published. Anyone can check it with the verifier in this repository.
+
+| | |
+|---|---|
+| Contract address | `294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913` |
+| Bundle URL | https://compact-off-chain-circuits.pages.dev/erc20/index.json |
+| Commitment | `cebd25ff611b7b3416a3bf3bb66a7ab64396806198c0f06d51b9114e15335eb1` |
+| `publishBundle` transaction | `7bdbf4b525c497c7e082557e6b3616def8439384a51ef6e9b34c478a36dbc63e`, block 582728 |
+| Deploy transaction | `708e845bbb787014a73ad8a5e5c7c5ab7a3638f40feba3b140ab299356a976e0`, block 582583 |
+| Indexer | https://indexer.stagenet.shielded.tools/api/v4/graphql |
+
+The files listed in `index.json`, with paths relative to the bundle URL:
+
+```
+README.md
+package.json
+out/compiler/contract-info.json
+out/contract/index.d.ts
+out/contract/index.js
+out/contract/package.json
+out/keys/allowance.verifier
+out/keys/balanceOf.verifier
+out/keys/decimals.verifier
+out/keys/name.verifier
+out/keys/symbol.verifier
+out/keys/totalSupply.verifier
+src/OffChainInterface.compact
+src/integrations/openzeppelin/FungibleTokenReadable.Interface.compact
+src/integrations/openzeppelin/FungibleTokenReadable.compact
+src/vendor/openzeppelin/token/FungibleToken.compact
+src/vendor/openzeppelin/utils/Utils.compact
+```
+
+Check it from a clone, after `npm ci`:
+
+```sh
+node src/verify.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
+  --address 294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913 \
+  --circuit name --level 3
+```
+
+It prints two `L1 OK`, six `L2 OK`, seven `L3 OK` and `name() = "Off-Chain Reads Token"`. The other reads return `symbol() = "OCRT"`, `decimals() = 18` and `totalSupply() = 1000000000000000000000000`. The whole supply was minted to a keyless demo holder, so `--circuit balanceOf --args key:0x13f03a2916c2bbb04b050ffb5061187386c73af8ba57bf70c7ddf1fa8c2a005a` returns the same amount. Level 3 needs `compact` 0.34.0; without it, drop `--level 3`.
+
+The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagenet/contracts/ERC20Live.compact). It imports the same module as the tested example, so its keys are the tested ones. It was deployed with `publishBundle` and the six reads only, because Stagenet's limit of 50,000 bytes written per block rejects all 19 circuits of the full example in one transaction. The maintenance authority then added `transfer`, `approve` and `transferFrom`. Every transaction is recorded in [live/stagenet/deployment.json](live/stagenet/deployment.json), and [live/stagenet](live/stagenet) holds the scripts that made it and a copy of the published bundle.
+
 ## How to use
 
 For a contract author. The full procedure and a checklist are in [docs/INTEGRATION.md](docs/INTEGRATION.md).
@@ -198,7 +245,7 @@ docs/INTEGRATION.md                           adding the pattern to your own con
 - Each bundle version costs one transaction with one proof after deployment, because constructors cannot emit. The prover key for `publishBundle` is about 67 MB, larger than any token circuit's, because the 256-byte payload is decomposed byte by byte.
 - Circuits with witnesses are refused. Reads of `boundedMerkleTree` slots are untested.
 - The verifier sets no timeout and no limit on the number of files. Read What to expect before running it unattended.
-- Not yet run against a live network. The test states are built locally, with verifier keys installed the way a deployment installs them.
+- Verified live on Stagenet for the ERC-20 example (see Live on Stagenet). The test suite builds states locally, with verifier keys installed the way a deployment installs them.
 
 ## Compatibility
 

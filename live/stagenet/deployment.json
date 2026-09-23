@@ -1,0 +1,93 @@
+{
+  "network": {
+    "name": "stagenet",
+    "networkId": "stagenet",
+    "node": "wss://rpc.stagenet.shielded.tools",
+    "indexer": "https://indexer.stagenet.shielded.tools/api/v4/graphql"
+  },
+  "token": {
+    "name": "Off-Chain Reads Token",
+    "symbol": "OCRT",
+    "decimals": 18
+  },
+  "demoHolder": "13f03a2916c2bbb04b050ffb5061187386c73af8ba57bf70c7ddf1fa8c2a005a",
+  "url": "https://compact-off-chain-circuits.pages.dev/erc20/index.json",
+  "address": "294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913",
+  "deploy": {
+    "txId": "008708ffde2178b2cf59dd7ed9ed3c094b36dc5ff8cd77fc654d0f14651633a41c",
+    "txHash": "708e845bbb787014a73ad8a5e5c7c5ab7a3638f40feba3b140ab299356a976e0",
+    "blockHeight": 582583,
+    "status": "SucceedEntirely",
+    "at": "2026-09-23T04:04:08.283Z"
+  },
+  "supply": {
+    "to": "13f03a2916c2bbb04b050ffb5061187386c73af8ba57bf70c7ddf1fa8c2a005a",
+    "amount": "1000000000000000000000000"
+  },
+  "inserted": {
+    "transfer": {
+      "txId": "008a665135400d8af2dbc3401affef155cb601f07a0c6cd7f597a5e56cae7a7c90",
+      "txHash": "537bc58cbc4b028a8b47b998e66d5f7f2196041602ee5baa84bc6cae05597890",
+      "blockHeight": 582667,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T04:12:32.693Z"
+    },
+    "approve": {
+      "txId": "00bf65ec527c04f07602896f19bac0774fbe0bcb79935d7acbffc8ded242ef6317",
+      "txHash": "e48e90ad2365a8781fb071fbcff827d9146331bcfaa482228686deeb5dd49503",
+      "blockHeight": 582670,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T04:12:50.062Z"
+    },
+    "transferFrom": {
+      "txId": "0081589dfadf26fb4f70e6239f37a41206aa916c73e8a096eefab1f41343c5ac36",
+      "txHash": "e4406bff730a57c8653937354220e7ea7f5a89d2c688348130ca090cdf76557c",
+      "blockHeight": 582673,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T04:13:08.911Z"
+    }
+  },
+  "bundle": {
+    "url": "https://compact-off-chain-circuits.pages.dev/erc20/index.json",
+    "commitment": "cebd25ff611b7b3416a3bf3bb66a7ab64396806198c0f06d51b9114e15335eb1",
+    "payload": "cebd25ff611b7b3416a3bf3bb66a7ab64396806198c0f06d51b9114e15335eb168747470733a2f2f636f6d706163742d6f66662d636861696e2d63697263756974732e70616765732e6465762f65726332302f696e6465782e6a736f6e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "files": [
+      "README.md",
+      "out/compiler/contract-info.json",
+      "out/contract/index.d.ts",
+      "out/contract/index.js",
+      "out/contract/package.json",
+      "out/keys/allowance.verifier",
+      "out/keys/balanceOf.verifier",
+      "out/keys/decimals.verifier",
+      "out/keys/name.verifier",
+      "out/keys/symbol.verifier",
+      "out/keys/totalSupply.verifier",
+      "package.json",
+      "src/OffChainInterface.compact",
+      "src/integrations/openzeppelin/FungibleTokenReadable.Interface.compact",
+      "src/integrations/openzeppelin/FungibleTokenReadable.compact",
+      "src/vendor/openzeppelin/token/FungibleToken.compact",
+      "src/vendor/openzeppelin/utils/Utils.compact"
+    ],
+    "at": "2026-09-23T04:13:51.112Z"
+  },
+  "publish": {
+    "txId": "00891b02a1e87861aafe22e3da35ca7a5a2720c701c1d58a979627a215d05e4d95",
+    "txHash": "7bdbf4b525c497c7e082557e6b3616def8439384a51ef6e9b34c478a36dbc63e",
+    "blockHeight": 582728,
+    "status": "SucceedEntirely",
+    "at": "2026-09-23T04:18:38.590Z"
+  },
+  "ifaceMetadata": {
+    "erc20": {
+      "entryPoint": "iface/v1/erc20",
+      "bytes": 160,
+      "txId": "00e2801ec9c035dbe1fed8ebceca81d49f1ddc728de6477ef4e7e34ff1b07c496b",
+      "txHash": "ac43894ffca3bd553352f1b9255c92f337c5d11b52cc82d7694afda311daabde",
+      "blockHeight": 582774,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T04:23:14.760Z"
+    }
+  }
+}

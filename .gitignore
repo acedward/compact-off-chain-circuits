@@ -7,3 +7,9 @@ tmp/
 .env
 .env.*
 !.env.example
+live/stagenet/.contract/
+live/stagenet/midnight-level-db/
+live/stagenet/*.log
+live/stagenet/contracts/managed/
+live/stagenet/logs/
+live/stagenet/.wrangler/

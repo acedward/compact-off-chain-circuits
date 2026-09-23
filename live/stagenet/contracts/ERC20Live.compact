@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: Apache-2.0
+// The contract deployed on Midnight Stagenet for the live demonstration.
+//
+// It imports the same module as compact/examples/fungible/Full.compact, so every
+// circuit below compiles to the verifier key the repository's tests check. It
+// differs in what it deploys:
+//   * the constructor mints the demo supply, so no mint circuit is exposed;
+//   * it deploys with publishBundle and the six ERC-20 reads only, because
+//     Stagenet's block limit (50,000 bytes written) cannot take all 19 keys of
+//     the full example in one deploy transaction. transfer, approve and
+//     transferFrom are added after deployment by the maintenance authority,
+//     with the keys from the full example's build.
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+import "../../../compact/integrations/openzeppelin/FungibleTokenReadable" prefix FungibleToken_;
+
+export { ContractAddress, Either, Maybe };
+
+constructor(
+  _name: Opaque<"string">,
+  _symbol: Opaque<"string">,
+  _decimals: Uint<8>,
+  holder: Either<Bytes<32>, ContractAddress>,
+  supply: Uint<128>
+) {
+  FungibleToken_initialize(_name, _symbol, _decimals);
+  FungibleToken__mint(disclose(holder), disclose(supply));
+}
+
+export circuit publishBundle(payload: Bytes<256>): [] {
+  return FungibleToken_publishBundle(payload);
+}
+
+export circuit name(): Opaque<"string"> {
+  return FungibleToken_name();
+}
+
+export circuit symbol(): Opaque<"string"> {
+  return FungibleToken_symbol();
+}
+
+export circuit decimals(): Uint<8> {
+  return FungibleToken_decimals();
+}
+
+export circuit totalSupply(): Uint<128> {
+  return FungibleToken_totalSupply();
+}
+
+export circuit balanceOf(account: Either<Bytes<32>, ContractAddress>): Uint<128> {
+  return FungibleToken_balanceOf(account);
+}
+
+export circuit allowance(
+  owner: Either<Bytes<32>, ContractAddress>,
+  spender: Either<Bytes<32>, ContractAddress>
+): Uint<128> {
+  return FungibleToken_allowance(owner, spender);
+}

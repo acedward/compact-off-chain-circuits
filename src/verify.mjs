@@ -8,6 +8,9 @@
 //   Level 3  Does the published source really produce them?      (recompile)
 //   then     What does the circuit return for these arguments?   (execute)
 //
+// Levels 1 and 2 always run together; `--level` is 2 (the default) or 3, which
+// adds the recompile.
+//
 // Level 1 copies only the files index.json lists, each checked, into a fresh
 // private directory; everything after it runs there. Nothing is submitted, no
 // proof is produced and no proof provider is contacted.
@@ -45,8 +48,9 @@ const verifierNames = (dir) => (existsSync(dir)
   : []);
 const keyNames = (bundleDir) => verifierNames(join(bundleDir, 'out', 'keys'));
 
-/** The levels `--level` and `verify({ level })` accept. */
-export const LEVELS = [1, 2, 3];
+/** The levels `--level` and `verify({ level })` accept. Level 1 always runs with Level 2. */
+export const LEVELS = [2, 3];
+const LEVEL_ERROR = 'must be 2 or 3 (Level 1 always runs with Level 2)';
 
 // ---------------------------------------------------------------------------
 // Level 1 — the deployer's commitment
@@ -270,7 +274,7 @@ export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 
  * returning.
  */
 export async function verify({ bundleDir, bundleUrl, indexerUrl, address, eventPayload, stateBytes, standard, circuit, args = [], level = 2, compactBin, tmpRoot, maxBytes }) {
-  if (!LEVELS.includes(level)) throw new Error(`level must be 1, 2 or 3, got ${JSON.stringify(level)}`);
+  if (!LEVELS.includes(level)) throw new Error(`level ${LEVEL_ERROR}, got ${JSON.stringify(level)}`);
   if (bundleDir && bundleUrl) throw new Error('pass either --bundle or --bundle-url, not both');
   const result = { bundle: {}, level: 0, requestedLevel: level, checks: {}, source: {} };
 
@@ -383,9 +387,9 @@ const USAGE = `coc-verify — execute a published contract read circuit and chec
                           the bundle/v1 event
   --circuit <name>        circuit to execute (omit to only verify)
   --args <...>            arguments for it, one CLI token each
-  --level <1|2|3>         highest level to attempt (default 2; 3 needs the pinned compiler).
-                          Levels 1 and 2 always run; a circuit runs only if its
-                          verifier key passed Level 2
+  --level <2|3>           highest level to attempt (default 2; 3 needs the pinned compiler).
+                          Level 1 always runs with Level 2; a circuit runs only
+                          if its verifier key passed Level 2
   --json                  machine-readable output
   --list                  list the circuits a local --bundle publishes (unverified) and exit
 
@@ -411,7 +415,7 @@ export function parseArgv(argv) {
       case '--circuit': o.circuit = next(); break;
       case '--level': {
         const v = next();
-        if (!/^[123]$/.test(v)) throw new Error(`--level must be 1, 2 or 3, got ${JSON.stringify(v)}`);
+        if (!/^[23]$/.test(v)) throw new Error(`--level ${LEVEL_ERROR}, got ${JSON.stringify(v)}`);
         o.level = Number(v);
         break;
       }

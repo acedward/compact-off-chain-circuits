@@ -59,8 +59,8 @@ export circuit publishBundle(payload: Bytes<256>): [] {
 
 `publishBundle` has no access control of its own. Without a check like the
 commented one, anyone who can call your contract can publish a newer bundle
-event, and consumers take the latest; at Levels 1 and 2 they would then run
-that party's wrapper. To use the check, uncomment it, set `publisher` in the
+event, and consumers take the latest; at Level 2 they would then run that
+party's wrapper. To use the check, uncomment it, set `publisher` in the
 constructor to `persistentHash<Vector<2, Bytes<32>>>([pad(32, "coc:publisher:"), secret])`
 computed off chain, and supply `publisherSecret` from your private state when
 you call `publishBundle`. The uncommented form compiles as written; any other
@@ -200,7 +200,8 @@ asked for verified (and the circuit, if one was named, returned a value), 1 when
 a level that ran failed or the named circuit was not run, 2 for a usage or input
 error, and 3 when the checks passed but the circuit rejected the arguments. No
 code from the bundle runs before the checks pass, and only a circuit whose key
-passed Level 2 runs: a pure circuit, which has no key, is refused.
+passed Level 2 runs: a pure circuit, which has no key, is refused. A pure
+circuit can still be called from the published code, but no level verifies it.
 
 Level 2 also compares the shipped keys with the `expectedVk` table the compiler
 embeds in `index.js`, which catches a bundle assembled from artifacts of two

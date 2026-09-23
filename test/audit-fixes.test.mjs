@@ -199,12 +199,18 @@ describe.skipIf(!isBuilt())(`F1, F2, F5: the executed circuit and bundle code ($
   });
 
   describe('F5: level and exit status', () => {
-    it('--level accepts only 1, 2 or 3', async () => {
-      for (const bad of ['x', '0', '4', '1.5', '', '2 ']) expect(() => parseArgv(['--level', bad])).toThrow(/--level must be 1, 2 or 3/);
-      for (const good of ['1', '2', '3']) expect(parseArgv(['--level', good]).level).toBe(Number(good));
-      await expect(verify({ stateBytes: Buffer.alloc(1), eventPayload: Buffer.alloc(256), level: 0 })).rejects.toThrow(/level must be 1, 2 or 3/);
+    it('--level accepts only 2 or 3; 1 is a usage error saying Level 1 always runs with Level 2 (D20)', async () => {
+      const MESSAGE = /level must be 2 or 3 \(Level 1 always runs with Level 2\)/;
+      for (const bad of ['1', 'x', '0', '4', '1.5', '', '2 ']) expect(() => parseArgv(['--level', bad])).toThrow(MESSAGE);
+      for (const good of ['2', '3']) expect(parseArgv(['--level', good]).level).toBe(Number(good));
+      expect(parseArgv([]).level).toBe(2);
+      for (const bad of [0, 1, 4]) await expect(verify({ stateBytes: Buffer.alloc(1), eventPayload: Buffer.alloc(256), level: bad })).rejects.toThrow(MESSAGE);
       const cli = await node('verify.mjs', ['--level', 'x', '--state', 'aa', '--event-payload', 'bb']);
       expect(cli.code).toBe(2);
+      const one = await node('verify.mjs', ['--level', '1', '--state', 'aa', '--event-payload', 'bb']);
+      expect(one.code).toBe(2);
+      expect(one.stderr).toMatch(/^error: --level must be 2 or 3 \(Level 1 always runs with Level 2\), got "1"$/m);
+      expect(one.stdout).toBe('');
     });
 
     it('exit 1 when a level that ran failed, or --circuit was given and nothing executed, whatever --level says', async () => {
@@ -215,12 +221,16 @@ describe.skipIf(!isBuilt())(`F1, F2, F5: the executed circuit and bundle code ($
       const { stateBytes } = advertise(dir);
       const stateFile = join(s.dir, 'hostile-F5.state.hex');
       writeFileSync(stateFile, stateBytes.toString('hex'));
-      for (const level of ['1', '2', '3']) {
+      for (const level of ['2', '3']) {
         const cli = await node('verify.mjs', ['--standard', 'demo', '--state', stateFile, '--bundle', dir, '--circuit', 'totalSupply', '--level', level]);
         expect({ level, code: cli.code }).toEqual({ level, code: 1 });
       }
-      const noCircuit = await node('verify.mjs', ['--standard', 'demo', '--state', stateFile, '--bundle', dir, '--level', '1']);
-      expect(noCircuit.code).toBe(1);   // Level 2 ran and failed
+      const noCircuit = await node('verify.mjs', ['--standard', 'demo', '--state', stateFile, '--bundle', dir]);
+      expect(noCircuit.code).toBe(1);   // Level 2 (the default) ran and failed
+      // --level 1 is refused before anything is checked (D20).
+      const one = await node('verify.mjs', ['--standard', 'demo', '--state', stateFile, '--bundle', dir, '--circuit', 'totalSupply', '--level', '1']);
+      expect(one.code).toBe(2);
+      expect(one.stdout).not.toMatch(/^L[123] /m);
       expect(exitStatus({ level: 2, requestedLevel: 2, checks: { level1: { ok: true }, level2: { ok: true, wrapper: { ok: true } } } }, { circuit: 'name' })).toBe(1);
     });
   });

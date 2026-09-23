@@ -176,7 +176,7 @@ Recompile the bundle's interface source, a file its index lists, with the compil
 
 ### Run the circuit
 
-Once every requested level has passed, `verify` runs the circuit through the bundle's generated wrapper against the contract state. It prints the result, or the circuit's failed assertion. It runs only a circuit whose verifier key passed Level 2. Any other, such as a pure circuit, which has no key, is refused, because nothing ties its code to the contract. Exit status is 0 when verified and, if a circuit was named, it returned a value; 1 when a level that ran failed or the named circuit was not run; 2 for a usage error; and 3 when verified but the circuit rejected the arguments. `--level` takes 1, 2 or 3, and Levels 1 and 2 always run.
+Once every requested level has passed, `verify` runs the circuit through the bundle's generated wrapper against the contract state. It prints the result, or the circuit's failed assertion. It runs only a circuit whose verifier key passed Level 2. Any other, such as a pure circuit, which has no key, is refused, because nothing ties its code to the contract. A pure circuit can still be called from the published code, but no level verifies it. Exit status is 0 when verified and, if a circuit was named, it returned a value; 1 when a level that ran failed or the named circuit was not run; 2 for a usage error; and 3 when verified but the circuit rejected the arguments. `--level` takes 2 (the default) or 3; Level 1 always runs with Level 2.
 
 ## How it works
 

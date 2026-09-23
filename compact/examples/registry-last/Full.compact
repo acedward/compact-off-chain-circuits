@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: MIT
+// Adapted from OpenZeppelin compact-contracts v0.3.0-alpha.1 @ 746724f8,
+// contracts/src/token/test/mocks/MockFungibleToken.compact, (c) 2025 Zeppelin Group Ltd.
+//
+// WARNING: FOR TESTING PURPOSES ONLY. Like the upstream mock, this contract
+// exposes internal circuits and bypasses safety checks. DO NOT deploy it.
+//
+// Placement P4, the interface registry at the END of the ledger: the fungible
+// example (compact/examples/fungible/Full.compact) plus the map from
+// `compact/templates/RegistryAtEnd.template.compact`, declared as the
+// contract's LAST ledger field. Contract fields follow every module field, so
+// FungibleToken keeps fields 0 to 6 and the registry is field 7, the state's
+// last leaf. With 8 fields (at most 15) nothing is regrouped, so the read
+// circuits keep the fungible example's verifier keys and the published
+// interface is the unchanged
+// `compact/integrations/openzeppelin/FungibleTokenReadable.Interface.compact`.
+// The registry contract deployed on Stagenet has the same shape, with the
+// struct declared inline, which compiles to the same key and state encoding.
+//
+// Also exports placement P1 (`publishInterfaceEvent`) and keeps P0
+// (`publishBundle`); neither reads the ledger.
+//
+// Changes from the fungible example (5): the types and events imports, the
+// three wrappers below `publishBundle`, and the registry declared last. No
+// access control; see the template's header.
+
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+
+import "../../integrations/openzeppelin/FungibleTokenReadable" prefix FungibleToken_;
+import "../../registry/InterfaceTypes";                                  // no ledger
+import "../../registry/InterfaceEvents" prefix InterfaceEvents_;         // no ledger
+
+export { ContractAddress, Either, Maybe };
+
+/**
+ * @description `init` is a param for testing.
+ * If `init` is true, initialize the contract with the
+ * _name`, `_symbol`, and `_decimals`.
+ * Otherwise, the contract will not initialize and we can test
+ * the contract when it is not initialized properly.
+*/
+constructor(
+  _name: Opaque<"string">,
+  _symbol: Opaque<"string">,
+  _decimals:Uint<8>,
+  init: Boolean
+) {
+  if (disclose(init)) {
+    FungibleToken_initialize(_name, _symbol, _decimals);
+  }
+}
+
+
+export circuit publishBundle(payload: Bytes<256>): [] {
+  return FungibleToken_publishBundle(payload);
+}
+
+export circuit publishInterface(standard: Bytes<32>, commitment: Bytes<32>, url: Opaque<"string">): [] {
+  __interfaces.insert(disclose(standard), InterfaceRef { commitment: disclose(commitment), url: disclose(url) });
+}
+
+export circuit removeInterface(standard: Bytes<32>): [] {
+  __interfaces.remove(disclose(standard));
+}
+
+export circuit publishInterfaceEvent(name: Bytes<32>, payload: Bytes<256>): [] {
+  return InterfaceEvents_publishInterfaceEvent(name, payload);
+}
+
+export circuit name(): Opaque<"string"> {
+  return FungibleToken_name();
+}
+
+export circuit symbol(): Opaque<"string"> {
+  return FungibleToken_symbol();
+}
+
+export circuit decimals(): Uint<8> {
+  return FungibleToken_decimals();
+}
+
+export circuit totalSupply(): Uint<128> {
+  return FungibleToken_totalSupply();
+}
+
+export circuit balanceOf(account: Either<Bytes<32>, ContractAddress>): Uint<128> {
+  return FungibleToken_balanceOf(account);
+}
+
+export circuit allowance(
+  owner: Either<Bytes<32>, ContractAddress>,
+  spender: Either<Bytes<32>, ContractAddress>
+): Uint<128> {
+  return FungibleToken_allowance(owner, spender);
+}
+
+export circuit transfer(to: Either<Bytes<32>, ContractAddress>, value: Uint<128>): Boolean {
+  return FungibleToken_transfer(to, value);
+}
+
+export circuit _unsafeTransfer(to: Either<Bytes<32>, ContractAddress>, value: Uint<128>): Boolean {
+  return FungibleToken__unsafeTransfer(to, value);
+}
+
+export circuit transferFrom(
+  fromAddress: Either<Bytes<32>, ContractAddress>,
+  to: Either<Bytes<32>, ContractAddress>,
+  value: Uint<128>
+): Boolean {
+  return FungibleToken_transferFrom(fromAddress, to, value);
+}
+
+export circuit _unsafeTransferFrom(
+  fromAddress: Either<Bytes<32>, ContractAddress>,
+  to: Either<Bytes<32>, ContractAddress>,
+  value: Uint<128>
+): Boolean {
+  return FungibleToken__unsafeTransferFrom(fromAddress, to, value);
+}
+
+export circuit approve(spender: Either<Bytes<32>, ContractAddress>, value: Uint<128>): Boolean {
+  return FungibleToken_approve(spender, value);
+}
+
+export circuit _approve(
+  owner: Either<Bytes<32>, ContractAddress>,
+  spender: Either<Bytes<32>, ContractAddress>,
+  value: Uint<128>
+): [] {
+  return FungibleToken__approve(owner, spender, value);
+}
+
+export circuit _transfer(
+  fromAddress: Either<Bytes<32>, ContractAddress>,
+  to: Either<Bytes<32>, ContractAddress>,
+  value: Uint<128>
+): [] {
+  return FungibleToken__transfer(fromAddress, to, value);
+}
+
+export circuit _unsafeUncheckedTransfer(
+  fromAddress: Either<Bytes<32>, ContractAddress>,
+  to: Either<Bytes<32>, ContractAddress>,
+  value: Uint<128>
+): [] {
+  return FungibleToken__unsafeUncheckedTransfer(fromAddress, to, value);
+}
+
+export circuit _mint(
+  account: Either<Bytes<32>, ContractAddress>,
+  value: Uint<128>
+): [] {
+  return FungibleToken__mint(account, value);
+}
+
+export circuit _unsafeMint(
+  account: Either<Bytes<32>, ContractAddress>,
+  value: Uint<128>
+): [] {
+  return FungibleToken__unsafeMint(account, value);
+}
+
+export circuit _burn(
+  account: Either<Bytes<32>, ContractAddress>,
+  value: Uint<128>
+): [] {
+  return FungibleToken__burn(account, value);
+}
+
+export circuit _spendAllowance(
+  owner: Either<Bytes<32>, ContractAddress>,
+  spender: Either<Bytes<32>, ContractAddress>,
+  value: Uint<128>
+): [] {
+  return FungibleToken__spendAllowance(owner, spender, value);
+}
+
+// The registry, pad(32, "iface/v1/<standard>") -> InterfaceRef.
+// Keep this the LAST ledger declaration of the contract.
+export ledger __interfaces: Map<Bytes<32>, InterfaceRef>;

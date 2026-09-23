@@ -65,3 +65,71 @@ export function integrationOnlyTree(dir) {
   cpSync(join(REPO, 'compact', 'OffChainInterface.compact'), join(c, 'OffChainInterface.compact'));
   return c;
 }
+
+// ---------------------------------------------------------------------------
+// Interface registry placements (compact/registry/, examples/registry-*)
+// ---------------------------------------------------------------------------
+export const REGISTRY_EXAMPLES = ['registry-first', 'registry-last'];
+/** The interface each registry example is checked against (scripts/check-keys.mjs PAIRS). */
+export const registryInterface = {
+  'registry-first': { src: join(REPO, 'compact', 'examples', 'registry-first', 'Interface.compact'), out: interfaceOut('registry-first') },
+  'registry-last': { src: interfaceSrc('fungible'), out: interfaceOut('fungible') },
+};
+export const isRegistryBuilt = () => isBuilt()
+  && REGISTRY_EXAMPLES.every((e) => existsSync(join(fullOut(e), 'keys', 'publishInterface.verifier')))
+  && existsSync(join(interfaceOut('registry-first'), 'keys'));
+export const REGISTRY_BUILD_HINT = 'build/registry-first or build/registry-last is missing — run scripts/build.sh';
+
+/** A copy of compact/registry/ in `dir`, so generated contracts can import "./registry/...". */
+export function registryTree(dir) {
+  mkdirSync(dir, { recursive: true });
+  cpSync(join(REPO, 'compact', 'registry'), join(dir, 'registry'), { recursive: true });
+  return dir;
+}
+
+/**
+ * Compile a generated contract and deploy it locally: constructor, then a
+ * `call(name, ...args)` that runs a circuit on the state and keeps its writes.
+ * The same local execution path as scripts/simulate-deploy.mjs.
+ */
+export async function localContract(src, out, { witnesses = {}, args = [] } = {}) {
+  const { readFileSync: rf, writeFileSync: wf } = await import('node:fs');
+  const { pathToFileURL } = await import('node:url');
+  const rt = await import('@midnight-ntwrk/compact-runtime');
+  compile(src, out);
+  wf(join(out, 'contract', 'package.json'), '{ "type": "module" }\n');
+  const { Contract } = await import(pathToFileURL(join(out, 'contract', 'index.js')).href);
+  const privateState = {};
+  const contract = new Contract(witnesses);
+  const { currentContractState: state } = await contract.initialState(rt.createConstructorContext(privateState, '0'.repeat(64)), ...args);
+  const call = async (name, ...cargs) => {
+    const ctx = rt.createCircuitContext(name, rt.dummyContractAddress(), '0'.repeat(64), state.data, privateState);
+    const r = await contract.circuits[name](ctx, ...cargs);
+    state.data = r.context.callContext.currentQueryContext.state;
+    return r;
+  };
+  const info = JSON.parse(rf(join(out, 'compiler', 'contract-info.json'), 'utf8'));
+  return { state, call, info, out };
+}
+
+/** SCALE compact length prefix. */
+const scaleCompact = (n) => {
+  if (n < 64) return Buffer.from([n << 2]);
+  if (n < 1 << 14) { const v = (n << 2) | 1; return Buffer.from([v & 255, v >> 8]); }
+  if (n < 1 << 30) { const b = Buffer.alloc(4); b.writeUInt32LE((n * 4 + 2) >>> 0); return b; }
+  throw new Error('blob too large for this helper');
+};
+
+/**
+ * The serialized ContractOperation a maintenance `IrInsert(entryPoint, blob)`
+ * produces: an operation with IR and no verifier key. Reproduced from the
+ * Stagenet fixture (test/operations.test.mjs checks it byte for byte), so
+ * tests can place operations-metadata entries in local states without
+ * ledger-v9. Not a writer for real deployments: use ledger-v9 `IrInsert`.
+ */
+export function irOperationBytes(blob) {
+  const inner = Buffer.concat([scaleCompact(blob.length), Buffer.from(blob)]);
+  return Buffer.concat([Buffer.from('midnight:contract-operation[v6]:'), Buffer.from([0, 0, 1, 4, 0]), scaleCompact(inner.length), inner]);
+}
+
+export const FIXTURES = join(REPO, 'test', 'fixtures');

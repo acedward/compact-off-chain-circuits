@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: Apache-2.0
+// compact-off-chain-circuits — interface registry at the START of the ledger
+// (placement P3).
+//
+// One map, keyed by `pad(32, "iface/v1/<standard>")`, holding an InterfaceRef
+// (commitment + index.json URL) per standard. A contract can advertise several
+// standards, and update or remove one without touching the others.
+//
+// IMPORT THIS MODULE FIRST. Compact lays out ledger fields module by module, in
+// import order (depth first), then the contract's own fields in declaration
+// order. Imported before any other module that declares a ledger, `__interfaces`
+// is field 0, and field 0 is always the state's first leaf however many fields
+// follow, so a reader finds the registry without knowing the contract.
+//
+//   import CompactStandardLibrary;
+//   import "./registry/InterfaceRegistry" prefix InterfaceRegistry_;   // first
+//   import "./MyTokenModule" prefix MyToken_;                          // then the rest
+//
+// First means first from the CONTRACT. Inside a module, the module's own
+// fields come before those of the modules it imports, so importing the registry
+// from a module that declares a ledger puts it after that module's fields.
+// (Importing it first from a ledger-free wrapper module that the contract
+// imports first also works.) Import it ONCE: each import of a module gets its
+// own copy of the module's ledger, so a second import makes a second registry.
+//
+// Cost of that: every other field moves by one position, so every circuit that
+// reads the ledger gets a different verifier key than the same contract without
+// the registry. Adopt it when the contract is new; for a deployed contract use
+// the operations metadata or an event, or put the registry last
+// (compact/templates/RegistryAtEnd.template.compact).
+//
+// There is NO access control here: anyone who can call the including contract
+// can overwrite or remove an entry. Restrict it in the contract's wrapper, for
+// example with the check from the README's "How to use" (declare `publisher`
+// in the contract, not here: contract fields come after every module field, so
+// it cannot displace the registry from field 0):
+//
+//   // witness publisherSecret(): Bytes<32>;
+//   // export ledger publisher: Bytes<32>;   // set in the constructor
+//
+//   export circuit publishInterface(standard: Bytes<32>, commitment: Bytes<32>, url: Opaque<"string">): [] {
+//     // assert(persistentHash<Vector<2, Bytes<32>>>([pad(32, "coc:publisher:"), publisherSecret()]) == publisher,
+//     //        "only the publisher can publish an interface");
+//     return InterfaceRegistry_publishInterface(standard, commitment, url);
+//   }
+//
+// The circuit does not check the `iface/v1/` prefix (Compact cannot slice
+// bytes); readers ignore keys without it.
+
+pragma language_version >= 0.23.0;
+
+module InterfaceRegistry {
+  import CompactStandardLibrary;
+  import "./InterfaceTypes";
+
+  export { InterfaceRef };
+
+  /** The registry: pad(32, "iface/v1/<standard>") -> InterfaceRef. */
+  export ledger __interfaces: Map<Bytes<32>, InterfaceRef>;
+
+  /**
+   * @description Adds or replaces the entry for one standard.
+   * @param {Bytes<32>} standard - pad(32, "iface/v1/<standard>").
+   * @param {Bytes<32>} commitment - the bundle commitment.
+   * @param {Opaque<"string">} url - the URL of the bundle's index.json.
+   * @return {[]} - Empty tuple.
+   */
+  export circuit publishInterface(standard: Bytes<32>, commitment: Bytes<32>, url: Opaque<"string">): [] {
+    __interfaces.insert(disclose(standard), InterfaceRef { commitment: disclose(commitment), url: disclose(url) });
+  }
+
+  /**
+   * @description Removes the entry for one standard, if present.
+   * @param {Bytes<32>} standard - pad(32, "iface/v1/<standard>").
+   * @return {[]} - Empty tuple.
+   */
+  export circuit removeInterface(standard: Bytes<32>): [] {
+    __interfaces.remove(disclose(standard));
+  }
+}

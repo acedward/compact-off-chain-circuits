@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0
+// compact-off-chain-circuits — the value every interface entry holds.
+//
+// A ledger-free module: it declares no ledger field, so importing it anywhere,
+// in any order, never moves a slot and never changes a verifier key. Both
+// ledger placements use it: `InterfaceRegistry.compact` (registry first) and
+// `compact/templates/RegistryAtEnd.template.compact` (registry last).
+//
+//   commitment  the 32-byte JubJub multiset commitment to a bundle's index.json
+//               (the 00021 commitment, computed by src/deployer.mjs)
+//   url         the UTF-8 URL of that index.json, with no length cap
+//
+// The URL is `Opaque<"string">` rather than `Bytes<224>`: a map insert with the
+// opaque string needs a 279 KB prover key, with `Bytes<224>` 1.07 MB.
+//
+// The entry key is `pad(32, "iface/v1/<standard>")`, ASCII, so the standard
+// name is at most 23 bytes. Readers recognise entries by that prefix.
+//
+// Self-contained: copy it into any Compact project on its own.
+
+pragma language_version >= 0.23.0;
+
+module InterfaceTypes {
+  export struct InterfaceRef {
+    commitment: Bytes<32>;
+    url: Opaque<"string">;
+  }
+}

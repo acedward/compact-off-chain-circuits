@@ -1,0 +1,91 @@
+{
+  "bundle": "v1",
+  "commitment": "ecmh-jubjub-grouphash",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "de09b48e8715b8a9af65eef0fcf18e2277a0587774ef26e23eb1e700ea130e03",
+      "size": 3046
+    },
+    {
+      "path": "out/compiler/contract-info.json",
+      "sha256": "61ea63d0a71ba76908f211445216d5e5b9837fa75cc7d58e2c34e02f8ad7e926",
+      "size": 8337
+    },
+    {
+      "path": "out/contract/index.d.ts",
+      "sha256": "4d780a80e2bc07533a1bfc315a9186f1c6dca25fad9e0a9ce5737c38778ec355",
+      "size": 3694
+    },
+    {
+      "path": "out/contract/index.js",
+      "sha256": "502b7c8a0e6401026ece59b67036ca1f0430b239033656bede5307af3327d594",
+      "size": 43966
+    },
+    {
+      "path": "out/contract/package.json",
+      "sha256": "5a065fe7d8eab2a582f428e11c2ea63aaf70607a54f69cfd5c711b5c53d91b32",
+      "size": 21
+    },
+    {
+      "path": "out/keys/allowance.verifier",
+      "sha256": "7d84d0ecd5f16bc5713d592a5426829fd1b65e227ea63b8909f1b0ab6bd6f963",
+      "size": 1353
+    },
+    {
+      "path": "out/keys/balanceOf.verifier",
+      "sha256": "43acb6cf70e8a20db32dffc23145f6e884076d40e63930b4ea42c1bdafa48b0d",
+      "size": 1353
+    },
+    {
+      "path": "out/keys/decimals.verifier",
+      "sha256": "d6a9a757d5d0f0fdbc5567dfad2df0fa0029d1f50901af8c7538cf9cb5eb883e",
+      "size": 1353
+    },
+    {
+      "path": "out/keys/name.verifier",
+      "sha256": "167db2d85e3495e73c035d81201ace23f0a549697a4bf222148f1635b549ba51",
+      "size": 1353
+    },
+    {
+      "path": "out/keys/symbol.verifier",
+      "sha256": "8e66dbda02dca27d0a8561bc5cd67c47ada9769e742af5229b778a47ed919796",
+      "size": 1353
+    },
+    {
+      "path": "out/keys/totalSupply.verifier",
+      "sha256": "9039c56b13c6cbaab04d0317989fd75579396e33c089fccf6e389b2badff1ca6",
+      "size": 1353
+    },
+    {
+      "path": "package.json",
+      "sha256": "3224206a033feb403c2d678bdd2793b001066466467ecc534addc7ee5fdbdc36",
+      "size": 423
+    },
+    {
+      "path": "src/OffChainInterface.compact",
+      "sha256": "43e7a0df257f54314e6a41ef48f6408e0ec6e376e47b2eb562fb84b2e609b77f",
+      "size": 1737
+    },
+    {
+      "path": "src/integrations/openzeppelin/FungibleTokenReadable.Interface.compact",
+      "sha256": "a67206f603d9a192f2ce62f851bf020bab7a5d1e07b18a2bdc008f0ae5b41956",
+      "size": 2211
+    },
+    {
+      "path": "src/integrations/openzeppelin/FungibleTokenReadable.compact",
+      "sha256": "2c90e72ca43cf1c092aadfa730faf4509b8d374e1752d7421c06a2373d95161b",
+      "size": 4863
+    },
+    {
+      "path": "src/vendor/openzeppelin/token/FungibleToken.compact",
+      "sha256": "26f4e10c978b2742ce0c77c5aa7c8a6edfa787bba0ec6bfb81e565a61a171760",
+      "size": 28667
+    },
+    {
+      "path": "src/vendor/openzeppelin/utils/Utils.compact",
+      "sha256": "ae8bc73879b86e9aaa0b36b5577d02f6ae238f1640513696469c0af7014ea283",
+      "size": 7768
+    }
+  ]
+}

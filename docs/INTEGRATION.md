@@ -59,8 +59,8 @@ export circuit publishBundle(payload: Bytes<256>): [] {
 
 `publishBundle` has no access control of its own. Without a check like the
 commented one, anyone who can call your contract can publish a newer bundle
-event, and consumers take the latest; at Levels 1 and 2 they would then run
-that party's wrapper. To use the check, uncomment it, set `publisher` in the
+event, and consumers take the latest; at Level 2 they would then run that
+party's wrapper. To use the check, uncomment it, set `publisher` in the
 constructor to `persistentHash<Vector<2, Bytes<32>>>([pad(32, "coc:publisher:"), secret])`
 computed off chain, and supply `publisherSecret` from your private state when
 you call `publishBundle`. The uncommented form compiles as written; any other
@@ -139,6 +139,11 @@ argument, using whatever tooling you normally use to call your contract
 (midnight-js, a wallet, a CLI). Publishing a new bundle is another call;
 consumers take the event with the highest id.
 
+The event is one of several places to advertise the bundle. The contract's
+operations metadata, a registry map in its ledger or index 15 of its state can
+hold one entry per standard instead; [PLACEMENTS.md](PLACEMENTS.md) compares
+them, and `verify --standard <name>` reads any of them.
+
 ## Step 6 — what your consumers run
 
 ```sh
@@ -180,22 +185,27 @@ What they get:
   every file it lists matches its entry. The bundle is the deployer's
   commitment.
 * **Level 2** — every verifier key in the bundle equals the key stored on chain
-  for that entry point. The published circuits are the deployed circuits. No
+  for that entry point, and every published circuit that has an entry point on
+  chain ships its key. The published circuits are the deployed circuits. No
   compiler needed.
 * **Level 3** (`--level 3`, needs the pinned `compact` toolchain) — recompiling
-  the published source reproduces the shipped keys and `index.js` byte for byte,
+  the published source, a file the index lists, reproduces exactly the shipped
+  keys and `index.js` byte for byte,
   which binds the source and the generated wrapper to the deployed circuit and
   removes you from the trust chain.
 
 The tool prints the level it reached, and for indexer input the block height and
 transaction hash of the state it read. Its exit status is 0 when everything
-asked for verified, 1 when a verification level failed (in which case nothing was
-executed), 2 for a usage or input error, and 3 when the checks passed but the
-circuit rejected the arguments.
+asked for verified (and the circuit, if one was named, returned a value), 1 when
+a level that ran failed or the named circuit was not run, 2 for a usage or input
+error, and 3 when the checks passed but the circuit rejected the arguments. No
+code from the bundle runs before the checks pass, and only a circuit whose key
+passed Level 2 runs: a pure circuit, which has no key, is refused. A pure
+circuit can still be called from the published code, but no level verifies it.
 
 Level 2 also compares the shipped keys with the `expectedVk` table the compiler
 embeds in `index.js`, which catches a bundle assembled from artifacts of two
-different compilations.
+different compilations. It reads the table as text; the file is not run.
 
 ## Checklist
 

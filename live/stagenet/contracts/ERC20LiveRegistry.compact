@@ -5,8 +5,10 @@
 // keys the repository's tests check. Two contract-level fields follow the module's
 // seven: `publisher`, then `__interfaces` declared LAST, so the registry is always
 // the ledger's last leaf and a reader can find it without knowing the layout.
-// Contract fields never shift module fields, so adding the registry leaves every
-// read circuit's verifier key unchanged.
+// Contract fields never shift module fields, and with nine fields the layout stays
+// one flat array, so adding the registry leaves every read circuit's verifier key
+// unchanged. Above 15 fields that no longer holds: Compact regroups the fields,
+// which changes their paths and so their keys (docs/PLACEMENTS.md, Layout rules).
 //
 // Only the holder of the publisher secret may write the registry: the constructor
 // stores a hash of it and publishInterface checks it through a witness.

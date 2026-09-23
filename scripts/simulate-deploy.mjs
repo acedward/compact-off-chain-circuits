@@ -54,6 +54,10 @@ export const SCENARIOS = {
       await call('_setTokenURI', 2n, 'https://nft.example/meta/2.json');
     },
   },
+  // The interface registry examples: the fungible example with the registry
+  // first (P3) or last (P4). Same constructor, same test data.
+  get 'registry-first'() { return SCENARIOS.fungible; },
+  get 'registry-last'() { return SCENARIOS.fungible; },
   multi: {
     witnessName: 'wit_MultiTokenSK',
     constructorArgs: [{ is_some: true, value: 'https://multi.example/{id}.json' }],

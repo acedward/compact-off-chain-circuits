@@ -46,6 +46,33 @@ export function resolveImports(src, seen = new Set()) {
   return out;
 }
 
+/**
+ * compactc tags each verifier key with its format: `midnight:verifier-key[v6]` for the
+ * default ZKIR v2, `[v7]` for a build with `--feature-zkir-v3`. Level 3 must recompile
+ * with the same setting, so the bundle records the flag the keys imply.
+ */
+export const KEY_FORMAT_FLAGS = {
+  'midnight:verifier-key[v6]:': [],
+  'midnight:verifier-key[v7]:': ['--feature-zkir-v3'],
+};
+
+/** The `compact compile` flags that reproduce `keyFiles` (in `keyDir`); throws on unknown or mixed formats. */
+export function compileFlagsFor(keyDir, keyFiles) {
+  const formats = new Set();
+  for (const f of keyFiles) {
+    const head = readFileSync(join(keyDir, f)).subarray(0, 32).toString('latin1');
+    const tag = Object.keys(KEY_FORMAT_FLAGS).find((t) => head.startsWith(t));
+    if (!tag) throw new Error(`${f}: not a verifier key format this tool knows (${JSON.stringify(head.slice(0, 26))})`);
+    formats.add(tag);
+  }
+  if (formats.size > 1) throw new Error(`the interface build mixes verifier key formats: ${[...formats].join(', ')}`);
+  return formats.size ? KEY_FORMAT_FLAGS[[...formats][0]] : [];
+}
+
+/** `Foo` for `Foo.Interface.compact`; the directory's name for a bare `Interface.compact`. */
+export const bundleStem = (src) => (basename(src) === 'Interface.compact'
+  ? basename(dirname(resolve(src))) : basename(src).replace(/\.Interface\.compact$/, ''));
+
 /** Longest directory prefix shared by all of `paths`. */
 export function commonRoot(paths) {
   const split = paths.map((p) => resolve(p).split(sep));
@@ -97,6 +124,7 @@ export function assembleBundle({ interfaceSrc, interfaceOut, outDir, url: reques
 
   // --- compiled artifacts ---
   const keyFiles = readdirSync(join(interfaceOut, 'keys')).filter((f) => f.endsWith('.verifier')).sort();
+  const flags = compileFlagsFor(join(interfaceOut, 'keys'), keyFiles);
   for (const f of keyFiles) copyFileSync(join(interfaceOut, 'keys', f), join(outDir, 'out', 'keys', f));
   for (const f of ['index.js', 'index.d.ts']) copyFileSync(join(interfaceOut, 'contract', f), join(outDir, 'out', 'contract', f));
   // The compiler emits ESM but no package.json; without this, Node refuses to import index.js.
@@ -109,9 +137,11 @@ export function assembleBundle({ interfaceSrc, interfaceOut, outDir, url: reques
     language: pins?.language ?? info['language-version'],
     runtime: pins?.runtime ?? info['runtime-version'],
     interface: interfaceRel,
+    // Recorded only when needed, so a default (ZKIR v2) bundle's package.json is unchanged.
+    ...(flags.length ? { flags } : {}),
   };
   writeFileSync(join(outDir, 'package.json'), JSON.stringify({
-    name: `${basename(interfaceSrc).replace(/\.Interface\.compact$/, '').toLowerCase()}-interface-bundle`,
+    name: `${bundleStem(interfaceSrc).toLowerCase()}-interface-bundle`,
     version: '1.0.0',
     private: true,
     type: 'module',
@@ -134,9 +164,9 @@ function bundleReadme({ url, address, indexerUrl, circuits, compact }) {
   return `# Published contract interface
 
 This directory is the off-chain interface bundle for a Midnight contract. The
-contract committed to it on chain with one \`bundle/v1\` event whose payload is
-a 32-byte commitment to \`${INDEX_FILE}\` followed by the URL of that
-\`${INDEX_FILE}\`.
+contract advertises a 32-byte commitment to \`${INDEX_FILE}\` and the URL of
+that \`${INDEX_FILE}\`, in a \`bundle/v1\` event or in one of the places the
+verifier's \`--standard\` option reads.
 
 | | |
 |---|---|
@@ -144,7 +174,7 @@ a 32-byte commitment to \`${INDEX_FILE}\` followed by the URL of that
 | Contract address | ${address ? `\`${address}\`` : '_not recorded — pass `--address` to the verifier_'} |
 | Indexer | ${indexerUrl ? `\`${indexerUrl}\`` : '_not recorded — pass `--indexer` to the verifier_'} |
 | Published circuits | ${circuits.map((c) => `\`${c}\``).join(', ')} |
-| Compiler / language / runtime | ${compact.compiler} / ${compact.language} / ${compact.runtime} |
+| Compiler / language / runtime | ${compact.compiler} / ${compact.language} / ${compact.runtime}${compact.flags ? ` (\`${compact.flags.join(' ')}\`)` : ''} |
 
 ## Verify and run a read
 
@@ -157,7 +187,7 @@ node <compact-off-chain-circuits>/src/verify.mjs --bundle-url ${url} \\
 \`\`\`
 
 Without \`--bundle-url\` the verifier takes the URL from the contract's latest
-event. It downloads \`${INDEX_FILE}\`, checks it against the commitment on chain,
+event, or with \`--standard <name>\` from that standard's entry. It downloads \`${INDEX_FILE}\`, checks it against the commitment on chain,
 then downloads each file it lists into a private temporary directory and checks
 its sha256 (Level 1). It then checks that every verifier key is the key the chain
 stores for that entry point (Level 2) and executes the circuit against the
@@ -173,7 +203,7 @@ node <compact-off-chain-circuits>/src/verify.mjs --bundle <this directory> \\
 \`\`\`
 
 Add \`--level 3\` to recompile \`${compact.interface}\` with compact
-${compact.compiler} and check that it reproduces the shipped keys and
+${compact.compiler}${compact.flags ? ` and \`${compact.flags.join(' ')}\`` : ''} and check that it reproduces the shipped keys and
 \`out/contract/index.js\` byte for byte.
 
 ## What is here

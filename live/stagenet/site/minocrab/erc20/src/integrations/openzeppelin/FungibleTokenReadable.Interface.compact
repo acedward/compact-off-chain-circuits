@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: Apache-2.0
+// compact-off-chain-circuits — published interface (partial source) for a contract
+// built on `FungibleTokenReadable`.
+//
+// THE TWO INVARIANTS
+//
+// 1. LEDGER LAYOUT. A verifier key is a function of ledger slot positions, slot
+//    types and circuit logic; identifiers of every kind are erased by the
+//    compiler. This file therefore declares NO ledger of its own and imports the
+//    SAME module the deployed contract imports, which reproduces the deployed
+//    slot order exactly. If you write an interface by hand instead, repeat every
+//    ledger declaration of the full contract in the original order and with the
+//    original types; you may rename them. A declaration inserted BEFORE a slot a
+//    published circuit reads shifts that slot and changes the key.
+//
+// 2. ENTRY POINT NAMES. The chain stores each verifier key under the entry point
+//    name the deployed contract exported. Consumers look keys up by that name, so
+//    every circuit exported here MUST keep the deployed contract's name, even
+//    though the key itself does not depend on it.
+//
+// Exposed here: name, symbol, decimals, totalSupply, balanceOf, allowance.
+// Everything else the deployed contract can do stays unpublished; its entry point
+// names and verifier keys remain visible on chain, its circuit bodies do not.
+
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+import "./FungibleTokenReadable" prefix FungibleTokenReadable_;
+
+export { ContractAddress, Either, Maybe };
+
+export circuit name(): Opaque<"string"> {
+  return FungibleTokenReadable_name();
+}
+
+export circuit symbol(): Opaque<"string"> {
+  return FungibleTokenReadable_symbol();
+}
+
+export circuit decimals(): Uint<8> {
+  return FungibleTokenReadable_decimals();
+}
+
+export circuit totalSupply(): Uint<128> {
+  return FungibleTokenReadable_totalSupply();
+}
+
+export circuit balanceOf(account: Either<Bytes<32>, ContractAddress>): Uint<128> {
+  return FungibleTokenReadable_balanceOf(account);
+}
+
+export circuit allowance(
+  owner: Either<Bytes<32>, ContractAddress>,
+  spender: Either<Bytes<32>, ContractAddress>
+): Uint<128> {
+  return FungibleTokenReadable_allowance(owner, spender);
+}

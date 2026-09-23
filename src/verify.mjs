@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// The consumer tool. Given where a bundle is, the contract's `bundle/v1` event
-// and its current state, it answers three questions and then runs the read:
+// The consumer tool. Given where a bundle is, the contract's public-interface
+// event and its current state, it answers three questions and then runs the read:
 //
 //   Level 1  Is this bundle the one the contract committed to?   (index + files)
 //   Level 2  Are the circuits in it the circuits on chain?       (verifier keys)
@@ -35,11 +35,9 @@
 // compile that printed no trace line it recognises. It uses the installed
 // compiler; a version other than the one package.json pins is only reported.
 //
-// By default the commitment and URL come from the latest `bundle/v1` event.
-// With `--standard <name>` they come from discovery instead (src/registry.mjs):
-// the entry `iface/v1/<name>` from the operations metadata, else the spare root
-// slot [15], else the registry at the start of the ledger, else the one at the
-// end, else the newest `iface/v1/<name>` event.
+// The commitment and URL come from the contract's newest public-interface event
+// (the `Misc` event publishBundle emits; docs/FORMAT.md defines it), read from
+// an indexer, or from an event payload supplied directly.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
@@ -49,9 +47,8 @@ import { pathToFileURL } from 'node:url';
 import * as rt from '@midnight-ntwrk/compact-runtime';
 import { INDEX_FILE, indexCommitment, parsePayload } from './hash.mjs';
 import { Budget, BundleError, MAX_BUNDLE_BYTES, materialize, readIndex } from './fetch.mjs';
-import { fetchLatestBundleEvent, fetchMiscEvents, fetchState } from './indexer.mjs';
-import { asciiJson, ifaceName, inspectState, printable, selectEntry } from './registry.mjs';
-import { readStateArg } from './discover.mjs';
+import { fetchLatestBundleEvent, fetchState } from './indexer.mjs';
+import { asciiJson, printable } from './escape.mjs';
 import { ArgumentError, CircuitAssertionError, bundleInfo, executeInChild, uintTypeName } from './execute.mjs';
 
 const sha256hex = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -443,7 +440,7 @@ export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 
  * malformed request. The private directory Level 1 fills is removed before
  * returning.
  */
-export async function verify({ bundleDir, bundleUrl, indexerUrl, address, eventPayload, stateBytes, standard, circuit, args = [], level = 2, compactBin, tmpRoot, maxBytes }) {
+export async function verify({ bundleDir, bundleUrl, indexerUrl, address, eventPayload, stateBytes, circuit, args = [], level = 2, compactBin, tmpRoot, maxBytes }) {
   if (!LEVELS.includes(level)) throw new Error(`level ${LEVEL_ERROR}, got ${JSON.stringify(level)}`);
   if (circuit !== undefined && circuit !== null && (typeof circuit !== 'string' || circuit === '')) {
     throw new Error(`circuit must be a circuit name, got ${JSON.stringify(circuit)}`);
@@ -451,39 +448,10 @@ export async function verify({ bundleDir, bundleUrl, indexerUrl, address, eventP
   if (bundleDir && bundleUrl) throw new Error('pass either --bundle or --bundle-url, not both');
   const result = { bundle: {}, level: 0, requestedLevel: level, checks: {}, source: {} };
 
-  let commitment, url;
-  if (standard !== undefined && standard !== null) {
-    // The entry comes from discovery; no bundle/v1 event is needed.
-    const name = ifaceName(standard);
-    let events;
-    if (indexerUrl) {
-      if (!address) throw new Error('--indexer needs --address');
-      if (eventPayload) throw new Error('pass either --standard or --event-payload, not both');
-      const [st, evs] = await Promise.all([fetchState(indexerUrl, address), fetchMiscEvents(indexerUrl, address)]);
-      stateBytes = st.state;
-      events = evs;
-      result.source = { from: 'indexer', indexerUrl, address, blockHeight: st.blockHeight, txHash: st.txHash };
-    } else {
-      if (!stateBytes) throw new Error('--standard needs --indexer/--address or --state');
-      if (eventPayload) throw new Error('pass either --standard or --event-payload, not both');
-      result.source = { from: 'files' };
-    }
-    const found = inspectState(stateBytes, { events });
-    const entry = selectEntry(found.entries, name);
-    if (!entry) {
-      const have = [...new Set(found.entries.map((e) => e.key))];
-      throw new Error(`the contract advertises no ${name} in any placement${have.length ? ` (it advertises ${have.join(', ')})` : ''}`);
-    }
-    result.interface = {
-      ...entry,
-      alternatives: found.entries.filter((e) => e.key === entry.key && e !== entry).map((e) => ({ placement: e.placement, commitment: e.commitment, url: e.url })),
-    };
-    commitment = Buffer.from(entry.commitment, 'hex');
-    url = entry.url;
-  } else if (indexerUrl) {
+  if (indexerUrl) {
     if (!address) throw new Error('--indexer needs --address');
     const event = await fetchLatestBundleEvent(indexerUrl, address);
-    if (!event) throw new Error(`contract ${address} has published no bundle/v1 event: no published interface`);
+    if (!event) throw new Error(`contract ${address} has emitted no public-interface event: no published interface`);
     const st = await fetchState(indexerUrl, address);
     eventPayload = event.payload;
     stateBytes = st.state;
@@ -497,11 +465,11 @@ export async function verify({ bundleDir, bundleUrl, indexerUrl, address, eventP
     result.source = { from: 'files' };
   }
 
-  if (!result.interface) ({ commitment, url } = parsePayload(eventPayload));
+  const { commitment, url } = parsePayload(eventPayload);
   result.event = { url, commitment: Buffer.from(commitment).toString('hex') };
   result.bundle = bundleDir
     ? { from: 'dir', location: resolve(bundleDir) }
-    : { from: bundleUrl ? 'url' : result.interface ? 'entry url' : 'event url', location: bundleUrl ?? url };
+    : { from: bundleUrl ? 'url' : 'event url', location: bundleUrl ?? url };
 
   result.checks.level1 = await levelOne(
     bundleDir ? { bundleDir, committed: commitment } : { bundleUrl: bundleUrl ?? url, committed: commitment },
@@ -553,18 +521,14 @@ const USAGE = `coc-verify — execute a published contract read circuit and chec
 
   verify [--bundle-url <url> | --bundle <dir>] --indexer <graphql url> --address <hex> --circuit <name> [--args ...]
   verify [--bundle-url <url> | --bundle <dir>] --event-payload <hex> --state <hex|file> --circuit <name> [--args ...]
-  verify [--bundle-url <url> | --bundle <dir>] --standard <name> (--indexer <url> --address <hex> | --state <hex|file>) ...
 
   --bundle-url <url>      URL of the bundle's index.json (default: the URL in the event)
   --bundle <dir>          a local copy of the bundle, with its index.json, instead of a URL
-  --indexer <url>         indexer GraphQL endpoint, e.g. https://host/api/v4/graphql
+  --indexer <url>         indexer GraphQL endpoint, e.g. https://host/api/v4/graphql;
+                          the contract's newest public-interface event is used
   --address <hex>         contract address
-  --event-payload <hex>   256-byte bundle/v1 payload, instead of --indexer
+  --event-payload <hex>   the event's 256-byte payload, instead of --indexer
   --state <hex|file>      serialized contract state, instead of --indexer
-  --standard <name>       verify the interface iface/v1/<name> found by discovery
-                          (operations metadata, spare slot [15], ledger first,
-                          ledger last, newest event, in that order) instead of
-                          the bundle/v1 event
   --circuit <name>        circuit to execute, in a child process (omit to only verify)
   --args <...>            arguments for it, one CLI token each: Bytes<N> as exactly
                           2N hex digits (0x optional), Uint and Field in decimal,
@@ -595,7 +559,6 @@ export function parseArgv(argv) {
       case '--address': o.address = next(); break;
       case '--event-payload': o.eventPayloadHex = next(); break;
       case '--state': o.state = next(); break;
-      case '--standard': o.standard = next(); break;
       case '--circuit':
         o.circuit = next();
         if (o.circuit === '') throw new Error('--circuit needs a circuit name, got ""');
@@ -639,6 +602,16 @@ export function exitStatus(result, { circuit } = {}) {
   return 0;
 }
 
+/** A state given on the command line: a file (hex text or raw bytes) or hex. */
+export function readStateArg(s) {
+  if (existsSync(s)) {
+    const raw = readFileSync(s);
+    const text = raw.toString('utf8').trim();
+    return /^[0-9a-fA-F]+$/.test(text) ? Buffer.from(text, 'hex') : raw;
+  }
+  return Buffer.from(s.replace(/^0x/i, ''), 'hex');
+}
+
 async function main(argv) {
   let o;
   try { o = parseArgv(argv); } catch (e) { console.error(`error: ${printable(e.message)}\n\n${USAGE}`); return 2; }
@@ -667,7 +640,6 @@ async function main(argv) {
       address: o.address,
       eventPayload: o.eventPayloadHex ? Buffer.from(o.eventPayloadHex.replace(/^0x/i, ''), 'hex') : undefined,
       stateBytes: o.state ? readStateArg(o.state) : undefined,
-      standard: o.standard,
       circuit: o.circuit,
       args: o.args,
       level: o.level,
@@ -728,25 +700,14 @@ export function printReport(r) {
   if (r.source.from === 'indexer') {
     console.log(`indexer     : ${p(r.source.indexerUrl)}`);
     console.log(`contract    : ${p(r.source.address)}`);
-    if (!r.interface) console.log(`event       : id ${p(r.source.eventId)}${r.source.supersededIds?.length ? ` (supersedes ${r.source.supersededIds.map(p).join(', ')})` : ''}`);
+    console.log(`event       : id ${p(r.source.eventId)}${r.source.supersededIds?.length ? ` (supersedes ${r.source.supersededIds.map(p).join(', ')})` : ''}`);
     console.log(`state       : block ${p(r.source.blockHeight)}, tx ${p(r.source.txHash)}`);
   } else {
-    console.log(`input       : ${r.interface ? 'state' : 'event payload and state'} supplied directly (no indexer)`);
+    console.log('input       : event payload and state supplied directly (no indexer)');
   }
-  if (r.interface) {
-    const i = r.interface;
-    const at = i.placement === 'event' ? `event id ${p(i.eventId)}` : i.spareSlot ? 'spare slot [15]' : i.path ? `path [${i.path.map(p).join('][')}]` : `entry point ${p(i.entryPoint)}`;
-    console.log(`interface   : ${p(i.key)} from ${p(i.placement)} (${at})${i.alternatives.length ? `; also in ${i.alternatives.map((a) => p(a.placement)).join(', ')}` : ''}`);
-    // Only the placement and commitment: whoever wrote the other entry chose its URL.
-    for (const a of i.alternatives) {
-      if (a.commitment !== i.commitment || a.url !== i.url) {
-        console.log(`              WARN ${p(a.placement)} holds a different entry: commitment ${p(a.commitment)}${a.commitment === i.commitment ? ' (same commitment, another URL)' : ''}`);
-      }
-    }
-  }
-  console.log(`${r.interface ? 'url         ' : 'event url   '}: ${p(r.event.url)}`);
+  console.log(`event url   : ${p(r.event.url)}`);
   console.log(`commitment  : ${p(r.event.commitment)}`);
-  const from = { 'event url': ' (from the event)', 'entry url': ` (from the ${p(r.interface?.placement)} entry)`, dir: ' (local copy)' }[r.bundle.from] ?? '';
+  const from = { 'event url': ' (from the event)', dir: ' (local copy)' }[r.bundle.from] ?? '';
   console.log(`bundle      : ${p(r.bundle.location)}${from}`);
 
   const l1 = checks.level1;

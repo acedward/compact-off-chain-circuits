@@ -8,6 +8,7 @@
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { deployCheck } from '../src/deployer.mjs';
+import { PUBLIC_INTERFACE_EVENT, PUBLIC_INTERFACE_EVENT_HEX } from '../src/event.mjs';
 import { parsePayload } from '../src/hash.mjs';
 import { verify } from '../src/verify.mjs';
 import { simulate } from '../scripts/simulate-deploy.mjs';
@@ -59,9 +60,10 @@ describe.skipIf(!isBuilt())(`published reads against a simulated deployment (${i
         expect(bundle.circuits.sort()).toEqual([...PUBLISHED[example]].sort());
       });
 
-      it('the emitted event is a Misc event named bundle/v1 carrying commitment ++ index URL (US4)', () => {
+      it('the emitted event is the public-interface Misc event carrying commitment ++ index URL (US4)', () => {
         expect(sim.eventType).toBe('misc');
-        expect(sim.eventName).toBe('bundle/v1');
+        expect(sim.eventName).toBe(PUBLIC_INTERFACE_EVENT);
+        expect(sim.eventNameBytes.toString('hex')).toBe(PUBLIC_INTERFACE_EVENT_HEX);
         expect(sim.eventAtomBytes).toBe(288);
         const { commitment, url: emitted } = parsePayload(sim.eventPayload);
         expect(commitment.equals(bundle.commitment)).toBe(true);

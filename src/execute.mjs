@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as rt from '@midnight-ntwrk/compact-runtime';
-import { asciiJson } from './registry.mjs';
+import { asciiJson } from './escape.mjs';
 import { loadWrapper } from './load.mjs';
 
 /** Thrown when the circuit itself rejected the arguments (an `assert` failed). */

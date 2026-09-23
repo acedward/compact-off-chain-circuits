@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// The two indexer queries the consumer needs (discovery uses the same two).
-// Nothing else is read from the chain, and the tool works entirely without this file when the event payload
+// The two indexer queries the consumer needs. Nothing else is read from the
+// chain, and the tool works entirely without this file when the event payload
 // and the state bytes are supplied by hand (indexer < 4.4.0, or offline).
 //
 // Midnight indexer 4.4.0-rc.1, GraphQL v4 (`/api/v4/graphql`):
@@ -8,9 +8,7 @@
 //   contractAction(address) { state transaction { hash block { height } } }
 // `HexEncoded` scalars are plain lowercase hex strings, without a `0x` prefix.
 // Both `contractEvents` and `MiscContractEvent` are @beta and may change.
-
-/** The 32-byte `Misc` event name this pattern uses, as the indexer returns it. */
-export const BUNDLE_EVENT_NAME = 'bundle/v1';
+import { PUBLIC_INTERFACE_EVENT_HEX } from './event.mjs';
 
 const stripHex = (s) => String(s).replace(/^0x/i, '');
 /** Decode a 32-byte hex event name to its string, dropping the zero padding. */
@@ -43,10 +41,9 @@ query BundleEvents($address: HexEncoded!, $limit: Int!, $offset: Int!) {
 /**
  * Every `Misc` event of a contract, oldest first, with its name decoded:
  * `{ id, name, nameHex, payload, txHash, blockHeight }`. Pages until a short
- * page comes back. Used by discovery (src/registry.mjs) for the per-standard
- * `iface/v1/<standard>` events as well as `bundle/v1`.
+ * page comes back.
  */
-export async function fetchMiscEvents(graphqlUrl, address) {
+async function fetchMiscEvents(graphqlUrl, address) {
   const limit = 500;
   const all = [];
   for (let offset = 0; ; offset += limit) {
@@ -57,7 +54,7 @@ export async function fetchMiscEvents(graphqlUrl, address) {
       all.push({
         id: e.id,
         name: decodeEventName(e.name),
-        nameHex: stripHex(e.name),
+        nameHex: stripHex(e.name).toLowerCase(),
         payload: Buffer.from(stripHex(e.payload ?? ''), 'hex'),
         txHash: e.transaction?.hash,
         blockHeight: e.transaction?.block?.height,
@@ -70,11 +67,14 @@ export async function fetchMiscEvents(graphqlUrl, address) {
 }
 
 /**
- * Latest `bundle/v1` event for a contract, plus the ids it supersedes.
- * Returns null when the contract has never published one.
+ * The contract's latest public-interface event (the `Misc` event `publishBundle`
+ * emits; src/event.mjs holds its name), plus the ids it supersedes. Only an
+ * event whose 32-byte name is exactly that name, zero padded, counts; every
+ * other `Misc` event is ignored. Returns null when the contract has never
+ * emitted one.
  */
 export async function fetchLatestBundleEvent(graphqlUrl, address) {
-  const all = (await fetchMiscEvents(graphqlUrl, address)).filter((e) => e.name === BUNDLE_EVENT_NAME);
+  const all = (await fetchMiscEvents(graphqlUrl, address)).filter((e) => e.nameHex === PUBLIC_INTERFACE_EVENT_HEX);
   if (all.length === 0) return null;
   const latest = all[all.length - 1];
   return {

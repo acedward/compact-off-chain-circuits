@@ -4,14 +4,14 @@ The exact rules behind the README's [How it works](../README.md#how-it-works). T
 
 ## Event
 
-`publishBundle` emits `Misc { name: pad(32, "bundle/v1"), payload }`.
+`publishBundle` emits `Misc { name: pad(32, "mip-xxxx:public-interface[v1]"), payload }`, the public-interface event. The name is fixed in the circuit.
 
 - Bytes 0 to 31 of the payload are the bundle's commitment.
 - Bytes 32 to 255 are the UTF-8 URL of `index.json`, zero padded, so the URL is at most 224 bytes.
 - The caller assembles the payload, because Compact has no byte concatenation.
-- The emitting contract's address is the provenance. When a contract has several `bundle/v1` events, the newest one wins.
+- The emitting contract's address is the provenance. A contract has one interface, at one authoritative URL: when it has emitted the event more than once, the newest one wins.
 
-The other places a contract can keep the same commitment and URL, one entry per standard, are compared in [PLACEMENTS.md](PLACEMENTS.md).
+Other places to keep the commitment and URL were studied but not delivered; see [PLACEMENTS.md](PLACEMENTS.md).
 
 ## Bundle
 

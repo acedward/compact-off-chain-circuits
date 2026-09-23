@@ -9,8 +9,7 @@
   },
   "bin": {
     "coc-verify": "src/verify.mjs",
-    "coc-deploy-check": "src/deployer.mjs",
-    "coc-discover": "src/discover.mjs"
+    "coc-deploy-check": "src/deployer.mjs"
   },
   "compact": {
     "compiler": "0.34.0",
@@ -22,7 +21,6 @@
     "check-keys": "node scripts/check-keys.mjs",
     "deploy-check": "node src/deployer.mjs",
     "verify": "node src/verify.mjs",
-    "discover": "node src/discover.mjs",
     "simulate": "node scripts/simulate-deploy.mjs",
     "test": "vitest run"
   },

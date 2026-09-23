@@ -30,9 +30,6 @@ done
 # example directory : integration module base name
 TOKENS=(fungible nft multi)
 declare -a MODULES=(FungibleTokenReadable NonFungibleTokenReadable MultiTokenReadable)
-# Interface registry examples (compact/registry/). registry-first has its own
-# interface; registry-last is checked against the unchanged fungible interface.
-REGISTRY_EXAMPLES=(registry-first registry-last)
 
 newest_source() {
   find "$ROOT/compact" -name '*.compact' -print0 | xargs -0 stat -f '%m' 2>/dev/null | sort -rn | head -1
@@ -60,15 +57,13 @@ for i in "${!TOKENS[@]}"; do
   compile "$ROOT/compact/integrations/openzeppelin/$m.Interface.compact" "$ROOT/build/$t/interface" "$t/interface ($m.Interface.compact)"
 done
 
-compile "$ROOT/compact/examples/registry-first/Interface.compact" "$ROOT/build/registry-first/interface" "registry-first/interface (examples/registry-first/Interface.compact)"
-
 if [ "$INTERFACES_ONLY" -eq 1 ]; then
   echo "(--interfaces: skipping example contracts and the key check)"
   exit 0
 fi
 
 echo "== examples (deployable contracts; minutes) =="
-for t in "${TOKENS[@]}" "${REGISTRY_EXAMPLES[@]}"; do
+for t in "${TOKENS[@]}"; do
   compile "$ROOT/compact/examples/$t/Full.compact" "$ROOT/build/$t/full" "$t/full (examples/$t/Full.compact)"
 done
 

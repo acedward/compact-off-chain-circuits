@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 // Produces, locally, exactly the two inputs a consumer would otherwise get from
-// an indexer: the `bundle/v1` event payload and the contract's serialized state.
+// an indexer: the public-interface event's payload and the contract's
+// serialized state.
 //
 // It does what a deployment plus a few calls would do:
 //   1. run the Full contract's constructor,
@@ -18,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as rt from '@midnight-ntwrk/compact-runtime';
+import { PUBLIC_INTERFACE_EVENT_HEX } from '../src/event.mjs';
 import { assemblePayload, indexCommitment, indexUrlFor, readIndexFile } from '../src/hash.mjs';
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -54,10 +56,6 @@ export const SCENARIOS = {
       await call('_setTokenURI', 2n, 'https://nft.example/meta/2.json');
     },
   },
-  // The interface registry examples: the fungible example with the registry
-  // first (P3) or last (P4). Same constructor, same test data.
-  get 'registry-first'() { return SCENARIOS.fungible; },
-  get 'registry-last'() { return SCENARIOS.fungible; },
   multi: {
     witnessName: 'wit_MultiTokenSK',
     constructorArgs: [{ is_some: true, value: 'https://multi.example/{id}.json' }],
@@ -108,11 +106,12 @@ export async function deploySimulated(example, { repo = REPO, initialized = true
 }
 
 /**
- * Deploy-simulate, publish the bundle event, and return the two consumer inputs.
- * The commitment is taken from the bundle's own index.json, exactly what the
- * deployer uploads; `url` gets index.json appended if it ends in `/`, as
- * deploy-check does. `payload` is asserted against the payload read back out of
- * the emitted event.
+ * Deploy-simulate, emit the public-interface event, and return the two consumer
+ * inputs. The commitment is taken from the bundle's own index.json, exactly what
+ * the deployer uploads; `url` gets index.json appended if it ends in `/`, as
+ * deploy-check does. The event's name is asserted to be exactly the
+ * public-interface event name, zero padded, and `payload` against the payload
+ * read back out of the emitted event.
  */
 export async function simulate(example, { bundleDir, url: requestedUrl, repo = REPO, initialized = true } = {}) {
   const { state, callCircuit, operations } = await deploySimulated(example, { repo, initialized });
@@ -125,13 +124,15 @@ export async function simulate(example, { bundleDir, url: requestedUrl, repo = R
   if (!logged) throw new Error('publishBundle produced no event');
   // One `Bytes<288>` atom: the 32-byte name followed by the 256-byte payload,
   // with trailing zero bytes stripped by the runtime.
-  const raw = Buffer.from(logged.data.content.value[0]);
-  const eventName = raw.subarray(0, 32).toString('utf8').replace(/\0+$/, '');
-  const eventPayload = Buffer.concat([raw.subarray(32), Buffer.alloc(256)]).subarray(0, 256);
+  const raw = Buffer.concat([Buffer.from(logged.data.content.value[0]), Buffer.alloc(288)]).subarray(0, 288);
+  const eventNameBytes = raw.subarray(0, 32);
+  const eventName = eventNameBytes.toString('utf8').replace(/\0+$/, '');
+  const eventPayload = raw.subarray(32);
+  if (eventNameBytes.toString('hex') !== PUBLIC_INTERFACE_EVENT_HEX) throw new Error(`publishBundle emitted an event named ${JSON.stringify(eventName)}, not the public-interface event`);
   if (!eventPayload.equals(payload)) throw new Error('the emitted payload is not the payload passed in');
 
   return {
-    example, url, commitment, payload, eventName, eventPayload, operations,
+    example, url, commitment, payload, eventName, eventNameBytes, eventPayload, operations,
     eventType: logged.eventType,
     eventAtomBytes: logged.data?.content?.alignment?.[0]?.value?.length,
     state: Buffer.from(state.serialize()),

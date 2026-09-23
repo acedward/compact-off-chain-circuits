@@ -2,11 +2,11 @@
 
 Run a Midnight contract's read circuits off chain, against its current state, and check that the code you ran is the code that was deployed.
 
-A contract commits to a small bundle: a partial Compact source containing only the circuits you want readable, plus what it compiles to. It publishes a 32-byte commitment and the URL of the bundle's `index.json`, in an event or in one of the other places compared in [docs/PLACEMENTS.md](docs/PLACEMENTS.md). Anyone can then call those circuits locally, with no transaction and no proof, and verify the result at three levels. The bundle is a light binding. It carries verifier keys and the generated wrapper, never prover keys or zkir, which run to tens or hundreds of megabytes.
+A contract commits to a small bundle: a partial Compact source containing only the circuits you want readable, plus what it compiles to. It publishes a 32-byte commitment and the URL of the bundle's `index.json` in one event, and the newest event wins. Anyone can then call those circuits locally, with no transaction and no proof, and verify the result at three levels. The bundle is a light binding. It carries verifier keys and the generated wrapper, never prover keys or zkir, which run to tens or hundreds of megabytes.
 
 The examples apply the pattern to OpenZeppelin's FungibleToken, NonFungibleToken and MultiToken, used unmodified, to show it is compatible with that well-known implementation and makes metadata such as `name`, `symbol`, `decimals`, `tokenURI` and `uri` readable. Targets Midnight 2.x (Ledger v9).
 
-The ERC-20 example is deployed on Midnight Stagenet, and its bundle is published at https://compact-off-chain-circuits.pages.dev/erc20/index.json, a real `index.json` to look at. [Live on Stagenet](#live-on-stagenet) lists that contract and five more, with their commitments and the commands to verify them.
+The ERC-20 example is deployed on Midnight Stagenet, and its bundle is published at https://compact-off-chain-circuits.pages.dev/erc20/index.json, a real `index.json` to look at. [Live on Stagenet](#live-on-stagenet) has the contract and its commitment.
 
 ## How to use
 
@@ -74,7 +74,7 @@ For a contract author. The full procedure and a checklist are in [docs/INTEGRATI
 
 5. **Upload the `bundle/` directory as is**, so the URL serves `index.json` and each file it lists sits at its path next to it. Any static host works. Keep that directory: rebuilding it later, for example with a newer version of this repository, can change its files and so its commitment.
 
-6. **Call `publishBundle(payload)` once** with the printed payload, using the tooling you normally use to call the contract. A new bundle version is another call, and the latest event wins. To advertise several interfaces, or to keep the entry in the contract's state rather than in an event, see [docs/PLACEMENTS.md](docs/PLACEMENTS.md).
+6. **Call `publishBundle(payload)` once** with the printed payload, using the tooling you normally use to call the contract. A new bundle version is another call, and the latest event wins. Other places to keep the commitment and URL were studied but not delivered; see [docs/PLACEMENTS.md](docs/PLACEMENTS.md).
 
 ## How to verify
 
@@ -93,11 +93,9 @@ node src/verify.mjs --indexer https://<indexer>/api/v4/graphql --address <contra
 
 The bundle comes from the URL in the event. Pass `--bundle-url <url>` to fetch it from elsewhere, or `--bundle <dir>` to use a local copy. Without an indexer that serves events, pass `--event-payload <hex> --state <hex or file>` instead of `--indexer` and `--address`. `verify` stops at the first failing level and executes nothing after a failure. No code from the bundle runs while the levels are checked.
 
-With `--standard <name>`, `verify` takes the commitment and URL of that standard's entry wherever the contract keeps it, instead of the `bundle/v1` event. `node src/discover.mjs --indexer <url> --address <hex>` lists every entry a contract advertises.
-
 ### Level 1: the bundle is the one the contract committed to
 
-1. Read the contract's latest `bundle/v1` event: `contractEvents(filter: { contractAddress, types: [MISC] })`.
+1. Read the contract's latest public-interface event (its exact name is in [docs/FORMAT.md](docs/FORMAT.md)): `contractEvents(filter: { contractAddress, types: [MISC] })`.
 2. Take the commitment from payload bytes 0 to 31 and the `index.json` URL from bytes 32 to 255.
 3. Fetch `index.json` and recompute the commitment from the files it lists. It must equal the event's.
 4. Fetch each listed file into a private folder and check its sha256 and size against the index. Files the index does not list are never fetched.
@@ -139,7 +137,7 @@ Arguments must fit the circuit's types exactly; nothing is padded or cut. A `Byt
 
 ## How it works
 
-- **The contract commits to a bundle.** `publishBundle` emits one event, `bundle/v1`, carrying the bundle's 32-byte commitment and the URL of its `index.json`.
+- **The contract commits to a bundle.** `publishBundle` emits one event, the public-interface event, carrying the bundle's 32-byte commitment and the URL of its `index.json`. A contract has one interface, and the newest event wins.
 - **A bundle is a folder of files.** `index.json` lists each file with its sha256 and size: the partial source, one verifier key per published circuit, the compiled wrapper `index.js`, the compiler's `contract-info.json`, and a `package.json` that pins the compiler version.
 - **The commitment covers every listed file.** Changing, adding or removing any file changes it.
 - **A partial source compiles to the deployed keys.** A circuit's verifier key depends on its logic and on where the ledger fields it reads sit, not on any name. So an interface that imports the deployed contract's modules, and exports only some circuits, gets the same keys.
@@ -173,23 +171,23 @@ You need `compact` 0.34.0 and Node 20 or later. The example contracts take sever
 
 ```sh
 npm ci
-scripts/build.sh                  # compiles 5 example contracts and 4 interfaces, then checks keys
-node scripts/check-keys.mjs       # 25 IDENTICAL, 0 not identical
-npm test                          # 361 tests, about two minutes
+scripts/build.sh                  # compiles 3 example contracts and 3 interfaces, then checks keys
+node scripts/check-keys.mjs       # 13 IDENTICAL, 0 not identical
+npm test                          # 257 tests, about a minute and a half
 ```
 
-The test data are OpenZeppelin's three token contracts and two registry examples, with deployments simulated locally: the contract state with its verifier keys installed, as a real deploy does. The tests check these claims (files in `test/`):
+The test data are OpenZeppelin's three token contracts, with deployments simulated locally: the contract state with its verifier keys installed, as a real deploy does. The tests check these claims (files in `test/`):
 
 | Claim | How it is checked | Tests |
 |---|---|---|
-| An interface compiles to the deployed keys | every published circuit's key equals the deployed contract's, byte for byte (25 keys); renaming fields keeps a key, inserting a field before one it reads changes it | `check-keys`, `keys`, `layout` |
+| An interface compiles to the deployed keys | every published circuit's key equals the deployed contract's, byte for byte (13 keys); renaming fields keeps a key, inserting a field before one it reads changes it | `check-keys`, `keys`, `layout` |
 | The reusable parts stand alone | the pattern module compiles alone in an unrelated project; the integrations compile with only their dependencies | `isolation` |
 | The whole flow works | for each example: build a bundle, simulate a deployment, pass Levels 1 to 3 and read values; the recompile reproduces the keys and the wrapper | `simulate`, `level3` |
 | Tampering is caught | a changed file, a changed index, a swapped key, extra files or a planted runtime from the host: each stops verification at the right level, before anything runs | `tamper`, `fetch`, `runtime-pinning` |
 | Only verified reads run | a circuit with a private input (witness) is refused, and so is one without a checked key | `witness`, `audit-fixes` |
 | The commitment is sound | Zcash's group-hash generator, a fixed test vector, file order does not matter, any change is detected | `hash` |
 | The footprint is small | one 288-byte event on chain; a one-circuit bundle's compiled files fit in 64 KB | `size` |
-| Entries are found from the address alone | the ledger layout rules and key effects; discovery on flat and nested layouts, on events and on two real Stagenet states; no false positives; the index-15 state | `placement-layout`, `placement-keys`, `discover`, `events`, `operations`, `slot15`, `verify-standard`, `indexer` |
+| The event is right | `publishBundle` emits exactly the public-interface name with the payload layout; the indexer reader takes only that event, and the newest one; the name appears nowhere else in the repository | `event-name`, `indexer` |
 | ZKIR v3 bundles verify | the compiler flag is recorded, and passed, only when the keys need it | `zkir-v3` |
 | The audit findings stay fixed | one case per audit finding, which failed before its fix | `audit-fixes`, `reaudit-fixes` |
 
@@ -219,27 +217,24 @@ node src/verify.mjs --bundle-url http://127.0.0.1:18080/nft/index.json \
 ```
 compact/OffChainInterface.compact             the pattern: publishBundle(payload: Bytes<256>)
 compact/templates/Interface.template.compact  starting point for your interface
-compact/registry/                             interface registry modules: types, registry map, per-standard event
-compact/templates/RegistryAtEnd.template.compact  registry declared as the contract's last field
 compact/integrations/openzeppelin/            example: unmodified OpenZeppelin tokens with publishBundle, and their interfaces
 compact/vendor/openzeppelin/                  upstream v0.3.0-alpha.1 @ 746724f8, unmodified, MIT
-compact/examples/*/Full.compact               deployable contracts used by the tests, registry-first and registry-last included
-src/                                          deployer, verify, discover, registry, slot15, fetch, hash, indexer, execute, load
+compact/examples/*/Full.compact               deployable contracts used by the tests
+src/                                          deployer, verify, event, escape, fetch, hash, indexer, execute, load, bundle
 scripts/                                      build.sh, check-keys.mjs, simulate-deploy.mjs
 test/                                         vitest suite
 docs/INTEGRATION.md                           adding the pattern to your own contract
-docs/PLACEMENTS.md                            where a contract can advertise its interfaces, compared
-docs/FORMAT.md                                the exact bundle format and verification rules
+docs/FORMAT.md                                the exact event, bundle format and verification rules
+docs/PLACEMENTS.md                            the event, and the other places studied but not delivered
 live/stagenet/                                the Stagenet deployments, their scripts and records
 ```
 
 ## Security considerations
 
-- **An entry is a claim by whoever could write it.** Operations metadata: only the maintenance authority, and nobody once it is frozen. Index 15: the deployer, at deploy time, unless the contract has a circuit that writes it (a MinoCrab contract can, and so can a circuit the maintenance authority adds later). Registry maps and events: any caller, unless the contract restricts the circuit. `verify --standard` prefers entries in that order.
-- **Level 1** proves the bundle is the one committed to, not who committed it. Unless the contract restricts `publishBundle`, anyone can publish a newer bundle.
+- **Level 1** proves the bundle is the one committed to, not who committed it. The newest event wins, and unless the contract restricts `publishBundle` (see the commented check under How to use), anyone can publish a newer one.
 - **Level 2** proves the bundle's keys are the deployed keys. It does not prove that the source or `index.js` match them.
 - **Level 3** proves the published source compiles to those keys and to that `index.js`. Run it once per commitment.
-- **Bundle code is untrusted.** Nothing from the bundle runs during the checks. A circuit runs in a separate process, so it cannot change the verifier or a later verification. That process is not a sandbox: below Level 3 it runs the entry writer's code with your permissions. If you do not trust them, use Level 3 or run `verify` isolated.
+- **Bundle code is untrusted.** Nothing from the bundle runs during the checks. A circuit runs in a separate process, so it cannot change the verifier or a later verification. That process is not a sandbox: below Level 3 it runs the publisher's code with your permissions. If you do not trust them, use Level 3 or run `verify` isolated.
 - **Only listed files are used.** The verifier downloads only what `index.json` lists, into a private folder, and pins the wrapper's runtime to its own. Extra files a host serves, such as a planted `node_modules`, are ignored.
 - **The commitment is binding**, because its group-hash points have unknown discrete logarithms. Index sizes only bound downloads; every file's sha256 is checked.
 - **The indexer is trusted** to serve the real contract state. Run your own to remove that trust.
@@ -247,7 +242,7 @@ live/stagenet/                                the Stagenet deployments, their sc
 
 ## Live on Stagenet
 
-The ERC-20 example is deployed on Midnight Stagenet and its interface bundle is published. Anyone can check it with the verifier in this repository.
+The ERC-20 example was deployed on Midnight Stagenet and its interface bundle published before the event got its current name: the contract emitted the earlier name, `bundle/v1`, which the current verifier does not read. A redeployment with the current event is pending. The bundle itself is a real published bundle to look at, and the verifier at commit `90ad944` still checks it against the contract.
 
 | | |
 |---|---|
@@ -280,48 +275,15 @@ src/vendor/openzeppelin/token/FungibleToken.compact
 src/vendor/openzeppelin/utils/Utils.compact
 ```
 
-Check it from a clone, after `npm ci`:
-
-```sh
-node src/verify.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
-  --address 294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913 \
-  --circuit name --level 3
-```
-
-It prints two `L1 OK`, six `L2 OK`, eight `L3 OK` and `name() = "Off-Chain Reads Token"`. The other reads return `symbol() = "OCRT"`, `decimals() = 18` and `totalSupply() = 1000000000000000000000000`. The whole supply was minted to a keyless demo holder, so `--circuit balanceOf --args key:0x13f03a2916c2bbb04b050ffb5061187386c73af8ba57bf70c7ddf1fa8c2a005a` returns the same amount. Level 3 needs `compact` 0.34.0; without it, drop `--level 3`.
-
-The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagenet/contracts/ERC20Live.compact). It imports the same module as the tested example, so its keys are the tested ones. It was deployed with `publishBundle` and the six reads only, because Stagenet's limit of 50,000 bytes written per block rejects all 19 circuits of the full example in one transaction. The maintenance authority then added `transfer`, `approve` and `transferFrom`. Every transaction is recorded in [live/stagenet/deployment.json](live/stagenet/deployment.json), and [live/stagenet](live/stagenet) holds the scripts that made it and a copy of the published bundle.
-
-### Interfaces advertised in the contract state
-
-The ERC-20 contract and four more deployments show the other places a contract can advertise its interfaces, each with the standards `erc20` and `erc20-metadata`. [docs/PLACEMENTS.md](docs/PLACEMENTS.md) compares them.
-
-| Contract | Where the entries are |
-|---|---|
-| `294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913` (above) | `erc20` in the operations metadata, and `erc20-metadata` in a per-standard event; the maintenance authority added both after deployment |
-| `2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115` | a registry map, the contract's last ledger field |
-| `84a104e1dbfab382ba9088211b4ed6fd0a5ca84460f0b7fc07d7f675a929c847` | the operations metadata; the maintenance authority was then handed to an empty committee, so the entries can no longer change |
-| `6bd2c5be43209ab14380a7f764d9c1823c23138cfb70f7bb0e8c6a06ab7bbd4a` | a registry map at index 15 of the state's root, written at deploy |
-| `721577875316525d6ef086e174d9bc3c8f0188f7fde73cd72a0bdbd310cf6ea7` | a registry map, the contract's first ledger field |
-
-```sh
-node src/discover.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
-  --address 2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115
-node src/verify.mjs --standard erc20-metadata --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
-  --address 2f4f7e6f16b59f424085c77cb173dc196a2a7ceb56d85e041045d1ecb877f115 --circuit symbol --level 3
-```
-
-`discover` lists every entry with the place it came from. `verify --standard` takes the entry for one standard and runs the three levels; here it prints `symbol() = "OCRR"`. All their entries verify to Level 3.
-
-A sixth deployment, `5d82194fac77216360bb4be5f3879007b46858877df6d9a2c7769d2e96ea0692`, is the ERC-20 example compiled with `--feature-zkir-v3`, whose `publishBundle` circuit comes from MinoCrab, a Rust library for Midnight circuits. It proves with a 1.77 MB key instead of compactc's 56.6 MB. Its bundle event verifies to Level 3 like the others; see [docs/PLACEMENTS.md](docs/PLACEMENTS.md#minocrab).
+The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagenet/contracts/ERC20Live.compact). It was deployed with `publishBundle` and the six reads only, because Stagenet's limit of 50,000 bytes written per block rejects all 19 circuits of the full example in one transaction; the maintenance authority then added `transfer`, `approve` and `transferFrom`. Every transaction is recorded in [live/stagenet/deployment.json](live/stagenet/deployment.json), together with the other Stagenet deployments, which tested the alternatives in [docs/PLACEMENTS.md](docs/PLACEMENTS.md), including a `publishBundle` proven with MinoCrab.
 
 ## Limitations
 
-- In an event, the URL is at most 224 bytes. The other placements have no such limit.
+- The URL is at most 224 bytes.
 - Each bundle version costs one transaction with one proof after deployment, because constructors cannot emit. The prover key for `publishBundle` is about 67 MB, larger than any token circuit's, because the 256-byte payload is decomposed byte by byte.
 - Circuits with witnesses are refused, and so are circuits with no verifier key on chain, such as pure ones. Reads of `boundedMerkleTree` slots are untested.
 - The verifier sets no timeout and no limit on the number of files. Read What to expect before running it unattended.
-- Verified live on Stagenet for the ERC-20 example, all six places a contract can advertise its entries, and a MinoCrab-proven event (see [Live on Stagenet](#live-on-stagenet)). The test suite builds states locally, with verifier keys installed the way a deployment installs them.
+- Verified live on Stagenet with the event's earlier name; a redeployment with the current name is pending (see [Live on Stagenet](#live-on-stagenet)). The test suite builds states locally, with verifier keys installed the way a deployment installs them.
 
 ## Tested with
 

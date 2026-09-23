@@ -84,27 +84,40 @@ node src/deployer.mjs \
   --interface-src MyContract.Interface.compact \
   --interface     out/interface \
   --full          out/full \
-  --url           https://you.example/mycontract/bundle/ \
+  --url           https://you.example/mycontract/ \
   --address       <contract address hex>   # optional, for the bundle README
   --indexer       https://indexer.example/api/v4/graphql  # optional
   --out           bundle/
 ```
 
-It assembles the bundle, compares every published verifier key with the key in
-`out/full/keys/`, refuses if any differs or if a published entry point name is
-absent from the full build, refuses a URL longer than 224 bytes, and prints:
+The URL is where the bundle's `index.json` will be served; a URL ending in `/`
+gets `index.json` appended, and the tool prints the final URL. It assembles the
+bundle and writes its `index.json`, compares every published verifier key with
+the key in `out/full/keys/`, refuses if any differs or if a published entry point
+name is absent from the full build, refuses a final URL longer than 224 bytes,
+and prints:
 
-* the bundle hash (hex),
-* the 256-byte event payload (hex) — `sha256(bundle) ++ utf8(url)` zero padded,
+* the final URL of `index.json` and an example of where a listed file will be
+  fetched from (paths resolve relative to that URL),
+* the 32-byte commitment (hex) to the files `index.json` lists,
+* the 256-byte event payload (hex) — `commitment ++ utf8(url)` zero padded,
 * the call to make: `publishBundle(<payload>)`.
+
+`index.json` lists every other file of the bundle with its `path`, `sha256` and
+`size`. The commitment is an elliptic-curve multiset hash on JubJub: each entry
+is mapped to a curve point with Zcash's Sapling GroupHash of
+`sha256(path) ++ sha256(file)` (personalization `COC_B_v1`) and the points are
+added, so it does not depend on the order of the entries. Paths must be relative,
+`/`-separated printable ASCII, with no `.`, `..` or `node_modules` segment;
+`deploy-check` refuses a bundle containing any other file name.
 
 ## Step 5 — publish and emit
 
-Serve the bundle directory at the URL **verbatim**: same files, same bytes, same
-relative paths, no extra files. The hash is taken over
-`"<relative path>\0<sha256 of file> \n"` lines for every file sorted by path
-(`node_modules` excluded), so a rewritten line ending, an added `index.html` or a
-re-encoded file all break it.
+Upload the bundle directory **as is**, so that the final URL serves its
+`index.json` and every listed file is served at its path relative to that URL.
+A listed file that is missing, altered or larger than its entry fails
+verification; extra files on the host are ignored, because consumers fetch only
+what `index.json` lists.
 
 Then call `publishBundle(payload)` once, with the printed hex payload as the
 argument, using whatever tooling you normally use to call your contract
@@ -114,23 +127,33 @@ consumers take the event with the highest id.
 ## Step 6 — what your consumers run
 
 ```sh
-node src/verify.mjs --bundle bundle/ \
+node src/verify.mjs \
   --indexer https://indexer.example/api/v4/graphql \
   --address <contract address hex> \
   --circuit tokenURI --args 1
 ```
 
-Consumers should run a verifier they obtained independently of your bundle,
-such as this repository's `src/verify.mjs`. The bundle also carries a copy of
-`verify.mjs` and its helpers for convenience, but files supplied by the party
-being checked prove nothing to a consumer who does not already trust you and
-your host. The verifier never loads code from the bundle directory other than
-the generated wrapper, whose runtime import it pins to its own installed runtime.
+The verifier reads the latest `bundle/v1` event, fetches the `index.json` at its
+URL (or at `--bundle-url <url>`), checks it against the commitment, then fetches
+each listed file into a private temporary directory and checks its sha256 and
+size before anything else runs. Each file is capped at its declared size and the
+whole bundle at 64 MiB.
+
+Consumers must run a verifier they obtained independently of your bundle, such
+as this repository's `src/verify.mjs`; the bundle carries no copy of it, because
+files supplied by the party being checked prove nothing to a consumer who does
+not already trust you and your host. The verifier never loads code from the
+bundle other than the generated wrapper, whose runtime import it pins to its
+own installed runtime.
 
 Without an indexer that serves events (indexer < 4.4.0), or offline, the same
-checks run from captured inputs:
+checks run from captured inputs, against the URL or against a local copy of the
+bundle directory (with its `index.json`):
 
 ```sh
+node src/verify.mjs --bundle-url https://you.example/mycontract/index.json \
+  --event-payload <hex> --state <hex or path to file> \
+  --circuit tokenURI --args 1
 node src/verify.mjs --bundle bundle/ \
   --event-payload <hex> --state <hex or path to file> \
   --circuit tokenURI --args 1
@@ -138,8 +161,9 @@ node src/verify.mjs --bundle bundle/ \
 
 What they get:
 
-* **Level 1** — the bundle hashes to the value the contract emitted. It is the
-  deployer's commitment.
+* **Level 1** — `index.json` produces the commitment the contract emitted, and
+  every file it lists matches its entry. The bundle is the deployer's
+  commitment.
 * **Level 2** — every verifier key in the bundle equals the key stored on chain
   for that entry point. The published circuits are the deployed circuits. No
   compiler needed.
@@ -166,5 +190,5 @@ different compilations.
 - [ ] Published circuits keep their deployed entry point names.
 - [ ] No published circuit uses a witness.
 - [ ] `deploy-check` exits 0 and prints a payload.
-- [ ] Bundle served verbatim at the URL in the payload.
+- [ ] Bundle directory uploaded as is; the URL in the payload serves its `index.json`.
 - [ ] `publishBundle(payload)` called once, after deployment.

@@ -25,7 +25,7 @@ module FungibleTokenReadable {
 
   /**
    * @description Commits this contract to an off-chain interface bundle.
-   * @param {Bytes<256>} payload - sha256(bundle) (32 bytes) ++ utf8(url) zero padded.
+   * @param {Bytes<256>} payload - commitment (32 bytes) ++ utf8(index.json url) zero padded.
    * @return {[]} - Empty tuple.
    */
   export circuit publishBundle(payload: Bytes<256>): [] {

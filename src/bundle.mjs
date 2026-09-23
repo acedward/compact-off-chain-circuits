@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Bundle assembly: collect the published interface source with the modules it
-// imports, the compiled artifacts a consumer needs, and a copy of the consumer
-// tool, into one directory that can be served as loose files.
+// imports and the compiled artifacts a consumer needs into one directory, and
+// write the index.json that lists them. The directory is uploaded as is; the
+// URL in the event is that index.json.
 //
 // Layout produced:
 //
+//   index.json                     every other file: path, sha256, size (never itself)
 //   README.md                      endpoint, address, usage
 //   package.json                   pinned compiler/language/runtime + the one npm dep
 //   src/<...>.Interface.compact    the published (partial) source
@@ -14,18 +16,16 @@
 //   out/contract/index.d.ts
 //   out/contract/package.json      { "type": "module" }, so Node loads index.js as ESM
 //   out/compiler/contract-info.json
-//   verify.mjs hash.mjs indexer.mjs execute.mjs load.mjs   copy of the consumer tool
 //
-// Deliberately absent: prover keys, zkir, and the source of every circuit that is
-// not published. The consumer tool works without them.
+// Deliberately absent: prover keys, zkir, the source of every circuit that is not
+// published, and any copy of the verifier. A verifier supplied by the party being
+// checked proves nothing, so consumers use one they obtained independently.
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bundleHash, walk } from './hash.mjs';
+import { INDEX_FILE, indexUrlFor, walk, writeIndex } from './hash.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** Files copied into the bundle so a consumer needs only Node and one npm dependency. */
-export const CONSUMER_TOOL_FILES = ['verify.mjs', 'hash.mjs', 'indexer.mjs', 'execute.mjs', 'load.mjs'];
 
 /**
  * Local `.compact` files imported by `src`, transitively (deepest first, no
@@ -63,13 +63,14 @@ export function commonRoot(paths) {
  * @param {string} o.interfaceSrc   path to the published `*.Interface.compact`
  * @param {string} o.interfaceOut   `compact compile` output directory for it
  * @param {string} o.outDir         bundle directory to create (emptied first)
- * @param {string} o.url            URL the bundle will be served at
+ * @param {string} o.url            URL of the bundle's index.json (a trailing / gets index.json appended)
  * @param {string} [o.address]      contract address, for the README only
  * @param {string} [o.indexerUrl]   indexer GraphQL endpoint, for the README only
  * @param {object} [o.pins]         { compiler, language, runtime } override
  * @param {string} [o.runtimeDep]   `@midnight-ntwrk/compact-runtime` version
  */
-export function assembleBundle({ interfaceSrc, interfaceOut, outDir, url, address, indexerUrl, pins, runtimeDep }) {
+export function assembleBundle({ interfaceSrc, interfaceOut, outDir, url: requestedUrl, address, indexerUrl, pins, runtimeDep }) {
+  const url = indexUrlFor(requestedUrl);
   for (const [label, p] of [['interface source', interfaceSrc], ['interface build', interfaceOut]]) {
     if (!existsSync(p)) throw new Error(`${label} not found: ${p}`);
   }
@@ -102,9 +103,6 @@ export function assembleBundle({ interfaceSrc, interfaceOut, outDir, url, addres
   writeFileSync(join(outDir, 'out', 'contract', 'package.json'), '{ "type": "module" }\n');
   copyFileSync(join(interfaceOut, 'compiler', 'contract-info.json'), join(outDir, 'out', 'compiler', 'contract-info.json'));
 
-  // --- consumer tool ---
-  for (const f of CONSUMER_TOOL_FILES) copyFileSync(join(HERE, f), join(outDir, f));
-
   // --- metadata ---
   const compact = {
     compiler: pins?.compiler ?? info['compiler-version'],
@@ -122,18 +120,23 @@ export function assembleBundle({ interfaceSrc, interfaceOut, outDir, url, addres
   }, null, 2) + '\n');
   writeFileSync(join(outDir, 'README.md'), bundleReadme({ url, address, indexerUrl, circuits, compact }));
 
-  const hash = bundleHash(outDir);
+  // --- the index, last: it lists every file written above ---
+  const { index, commitment, bytes: indexBytes } = writeIndex(outDir);
   const files = walk(outDir);
   const bytes = files.reduce((n, f) => n + statSync(join(outDir, f)).size, 0);
-  return { outDir, hash, circuits, keyFiles, files, bytes, interfaceRel, compact, info };
+  return { outDir, url, index, indexBytes, commitment, circuits, keyFiles, files, bytes, interfaceRel, compact, info };
 }
 
 function bundleReadme({ url, address, indexerUrl, circuits, compact }) {
+  const idx = indexerUrl ? `--indexer ${indexerUrl}` : '--indexer <graphql url>';
+  const adr = address ? `--address ${address}` : '--address <hex>';
+  const call = `--circuit ${circuits[0]}${circuits.length ? ' --args ...' : ''}`;
   return `# Published contract interface
 
 This directory is the off-chain interface bundle for a Midnight contract. The
-contract committed to it on chain with one \`bundle/v1\` event carrying
-\`sha256(this directory) ++ ${url}\`.
+contract committed to it on chain with one \`bundle/v1\` event whose payload is
+a 32-byte commitment to \`${INDEX_FILE}\` followed by the URL of that
+\`${INDEX_FILE}\`.
 
 | | |
 |---|---|
@@ -145,31 +148,29 @@ contract committed to it on chain with one \`bundle/v1\` event carrying
 
 ## Verify and run a read
 
-Verify with a copy of the verifier you obtained independently of this
-directory, for example from the repository that built it
-(https://github.com/acedward/compact-off-chain-circuits):
+Use a verifier you obtained independently of this bundle, for example the one in
+the repository that built it (https://github.com/acedward/compact-off-chain-circuits):
 
 \`\`\`sh
-node <compact-off-chain-circuits>/src/verify.mjs --bundle <this directory> \\
-  ${indexerUrl ? `--indexer ${indexerUrl} ` : '--indexer <graphql url> '}${address ? `--address ${address} ` : '--address <hex> '}--circuit ${circuits[0]}${circuits.length ? ' --args ...' : ''}
+node <compact-off-chain-circuits>/src/verify.mjs --bundle-url ${url} \\
+  ${idx} ${adr} ${call}
 \`\`\`
 
-This checks that this directory is the one the contract committed to (Level 1),
-that every verifier key here is the key the chain stores for that entry point
-(Level 2), and then executes the circuit against the contract's current state.
-Nothing is submitted and no proof is produced.
+Without \`--bundle-url\` the verifier takes the URL from the contract's latest
+event. It downloads \`${INDEX_FILE}\`, checks it against the commitment on chain,
+then downloads each file it lists into a private temporary directory and checks
+its sha256 (Level 1). It then checks that every verifier key is the key the chain
+stores for that entry point (Level 2) and executes the circuit against the
+contract's current state. Nothing is submitted and no proof is produced. Files
+that \`${INDEX_FILE}\` does not list are never fetched.
 
-Offline, or against an indexer older than 4.4.0 (no event support), supply the
-inputs directly:
+Offline, or against an indexer older than 4.4.0 (no event support), check a local
+copy of this directory and supply the inputs directly:
 
 \`\`\`sh
 node <compact-off-chain-circuits>/src/verify.mjs --bundle <this directory> \\
   --event-payload <256-byte hex> --state <state hex or file> --circuit ${circuits[0]}
 \`\`\`
-
-The \`*.mjs\` files in this directory are a convenience copy of that verifier.
-The deployer wrote them, so running them from here proves nothing against a
-deployer or host you do not already trust.
 
 Add \`--level 3\` to recompile \`${compact.interface}\` with compact
 ${compact.compiler} and check that it reproduces the shipped keys and
@@ -177,14 +178,16 @@ ${compact.compiler} and check that it reproduces the shipped keys and
 
 ## What is here
 
-\`src/\` is the published source: the interface and the modules it imports. It is
-deliberately partial — the contract has circuits that are not published here.
-\`out/\` is what that source compiles to: one verifier key per published circuit,
-the generated wrapper that executes them, and the compiler's contract
-description. Prover keys and zkir are not needed to read and are not shipped.
+\`${INDEX_FILE}\` lists every other file with its sha256 and size. \`src/\` is the
+published source: the interface and the modules it imports. It is deliberately
+partial — the contract has circuits that are not published here. \`out/\` is what
+that source compiles to: one verifier key per published circuit, the generated
+wrapper that executes them, and the compiler's contract description. Prover keys
+and zkir are not needed to read and are not shipped.
 
-Serve this directory verbatim. The hash covers every file's path and contents, so
-an added file, a rewritten line ending or a re-encoded file all break it.
+Upload this directory as is, so that the URL above serves its \`${INDEX_FILE}\` and
+each listed file is served at its path relative to it. A changed or missing
+listed file fails verification; extra files on the host are ignored.
 `;
 }
 

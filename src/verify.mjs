@@ -1,46 +1,67 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// The consumer tool. Given a bundle, the contract's `bundle/v1` event and its
-// current state, it answers three questions and then runs the read:
+// The consumer tool. Given where a bundle is, the contract's `bundle/v1` event
+// and its current state, it answers three questions and then runs the read:
 //
-//   Level 1  Is this bundle the one the contract committed to?   (hash)
+//   Level 1  Is this bundle the one the contract committed to?   (index + files)
 //   Level 2  Are the circuits in it the circuits on chain?       (verifier keys)
 //   Level 3  Does the published source really produce them?      (recompile)
 //   then     What does the circuit return for these arguments?   (execute)
 //
-// Nothing is submitted, no proof is produced and no proof provider is contacted.
+// Level 1 copies only the files index.json lists, each checked, into a fresh
+// private directory; everything after it runs there. Nothing is submitted, no
+// proof is produced and no proof provider is contacted.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import * as rt from '@midnight-ntwrk/compact-runtime';
-import { NPM_ARTIFACTS, bundleHash, fileHashes, parsePayload } from './hash.mjs';
+import { INDEX_FILE, indexCommitment, parsePayload } from './hash.mjs';
+import { Budget, BundleError, MAX_BUNDLE_BYTES, materialize, readIndex } from './fetch.mjs';
 import { fetchLatestBundleEvent, fetchState } from './indexer.mjs';
 import { CircuitAssertionError, bundleInfo, executeCircuit } from './execute.mjs';
 import { loadWrapper } from './load.mjs';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
 const sha256hex = (buf) => createHash('sha256').update(buf).digest('hex');
-const keyNames = (bundleDir) =>
-  readdirSync(join(bundleDir, 'out', 'keys')).filter((f) => f.endsWith('.verifier')).sort().map((f) => f.slice(0, -'.verifier'.length));
+const keyNames = (bundleDir) => {
+  const dir = join(bundleDir, 'out', 'keys');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith('.verifier')).sort().map((f) => f.slice(0, -'.verifier'.length));
+};
 
 // ---------------------------------------------------------------------------
 // Level 1 — the deployer's commitment
 // ---------------------------------------------------------------------------
-export function levelOne(bundleDir, committedHash) {
-  const actual = bundleHash(bundleDir);
-  const committed = Buffer.from(committedHash);
-  const ok = Buffer.from(actual).equals(committed);
-  const out = { ok, actual, committed };
-  if (!ok) {
-    // By far the most common cause: the consumer ran `npm install` in the bundle
-    // and npm wrote a lock file into it. Say so instead of leaving them to guess.
-    const present = NPM_ARTIFACTS.filter((f) => existsSync(join(bundleDir, f)));
-    if (present.length && Buffer.from(bundleHash(bundleDir, { ignore: present })).equals(committed)) {
-      out.npmArtifacts = present;
+/**
+ * Obtain index.json from `bundleUrl` or `bundleDir`, validate it, and compare
+ * the commitment of its entries with the event's. Only then obtain each listed
+ * file, check its size and sha256, and write it into a new private directory.
+ *
+ * Returns `{ ok, dir, ... }`; `dir` is the private directory (the caller removes
+ * it). On failure `ok` is false, `reason` says why and `file` names the file at
+ * fault when there is one. Never throws for a failed check.
+ */
+export async function levelOne({ bundleDir, bundleUrl, committed }, { tmpRoot, maxBytes = MAX_BUNDLE_BYTES } = {}) {
+  const out = { ok: false, committed: Buffer.from(committed), source: bundleUrl ? { url: bundleUrl } : { dir: resolve(bundleDir) } };
+  const budget = new Budget(maxBytes);
+  try {
+    const { index, source, bytes } = await readIndex(bundleUrl ? { url: bundleUrl } : { dir: bundleDir }, { budget });
+    out.index = { source, bytes, files: index.files.length };
+    out.computed = indexCommitment(index);
+    out.indexOk = out.computed.equals(out.committed);
+    if (!out.indexOk) {
+      out.reason = 'index does not match the commitment';
+      out.file = INDEX_FILE;
+      return out;
     }
+    const m = await materialize({ index, url: bundleUrl, dir: bundleDir }, { budget, tmpRoot });
+    Object.assign(out, { ok: true, dir: m.dir, files: m.files, bytes: bytes + m.bytes, requests: bundleUrl ? m.requests + 1 : 0 });
+  } catch (e) {
+    if (!(e instanceof BundleError)) throw e;
+    out.reason = e.message;
+    out.file = e.file;
   }
   return out;
 }
@@ -58,7 +79,9 @@ export function levelOne(bundleDir, committedHash) {
 export async function levelTwo(bundleDir, stateBytes) {
   const state = rt.ContractState.deserialize(Uint8Array.from(Buffer.from(stateBytes)));
   const rows = [];
-  for (const name of keyNames(bundleDir)) {
+  const names = keyNames(bundleDir);
+  if (names.length === 0) rows.push({ circuit: '(none)', status: 'FAIL', reason: 'the bundle ships no out/keys/*.verifier, so nothing can be checked' });
+  for (const name of names) {
     const shipped = readFileSync(join(bundleDir, 'out', 'keys', `${name}.verifier`));
     const onChain = state.operation(name)?.verifierKey;
     if (!onChain) { rows.push({ circuit: name, status: 'FAIL', reason: 'no verifier key on chain for this entry point' }); continue; }
@@ -70,7 +93,9 @@ export async function levelTwo(bundleDir, stateBytes) {
 
 /** Check `expectedVk` in the generated wrapper against the shipped keys. */
 export async function wrapperBinding(bundleDir) {
-  const mod = await loadWrapper(bundleDir);
+  let mod;
+  try { mod = await loadWrapper(bundleDir); }
+  catch (e) { return { ok: false, rows: [], error: `out/contract/index.js could not be loaded: ${String(e?.message ?? e).split('\n')[0]}` }; }
   const expected = mod.expectedVk;
   if (!expected) return { ok: true, skipped: true, reason: 'this compiler emits no expectedVk table' };
   const rows = [];
@@ -87,7 +112,9 @@ export async function wrapperBinding(bundleDir) {
 // ---------------------------------------------------------------------------
 /** Recompile the published source and compare with everything shipped. */
 export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 'compact' } = {}) {
-  const pkg = JSON.parse(readFileSync(join(bundleDir, 'package.json'), 'utf8'));
+  let pkg;
+  try { pkg = JSON.parse(readFileSync(join(bundleDir, 'package.json'), 'utf8')); }
+  catch (e) { return { ok: false, rows: [], error: `bundle package.json is missing or not JSON (${e.code ?? e.message})` }; }
   const pinned = pkg.compact ?? {};
   const src = join(bundleDir, pinned.interface ?? '');
   if (!pinned.interface || !existsSync(src)) {
@@ -128,12 +155,16 @@ export function levelThree(bundleDir, { compactBin = process.env.COMPACT_BIN || 
 /**
  * Run the checks and, if a circuit is named, the read.
  *
- * Inputs are either `{ indexerUrl, address }` or `{ eventPayload, stateBytes }`.
+ * Chain inputs are either `{ indexerUrl, address }` or `{ eventPayload, stateBytes }`.
+ * The bundle is `bundleDir` (a local copy with its index.json), `bundleUrl` (the
+ * URL of an index.json), or, with neither, the URL the event carries.
  * Returns a structured result; never throws for a failed check, only for a
- * malformed request.
+ * malformed request. The private directory Level 1 fills is removed before
+ * returning.
  */
-export async function verify({ bundleDir, indexerUrl, address, eventPayload, stateBytes, circuit, args = [], level = 2, compactBin }) {
-  const result = { bundleDir, level: 0, requestedLevel: level, checks: {}, source: {} };
+export async function verify({ bundleDir, bundleUrl, indexerUrl, address, eventPayload, stateBytes, circuit, args = [], level = 2, compactBin, tmpRoot, maxBytes }) {
+  if (bundleDir && bundleUrl) throw new Error('pass either --bundle or --bundle-url, not both');
+  const result = { bundle: {}, level: 0, requestedLevel: level, checks: {}, source: {} };
 
   if (indexerUrl) {
     if (!address) throw new Error('--indexer needs --address');
@@ -152,32 +183,43 @@ export async function verify({ bundleDir, indexerUrl, address, eventPayload, sta
     result.source = { from: 'files' };
   }
 
-  const { hash: committedHash, url } = parsePayload(eventPayload);
-  result.event = { url, hash: Buffer.from(committedHash).toString('hex') };
+  const { commitment, url } = parsePayload(eventPayload);
+  result.event = { url, commitment: Buffer.from(commitment).toString('hex') };
+  result.bundle = bundleDir
+    ? { from: 'dir', location: resolve(bundleDir) }
+    : { from: bundleUrl ? 'url' : 'event url', location: bundleUrl ?? url };
 
-  result.checks.level1 = levelOne(bundleDir, committedHash);
+  result.checks.level1 = await levelOne(
+    bundleDir ? { bundleDir, committed: commitment } : { bundleUrl: bundleUrl ?? url, committed: commitment },
+    { tmpRoot, maxBytes },
+  );
   if (!result.checks.level1.ok) return result;
   result.level = 1;
 
-  result.checks.level2 = await levelTwo(bundleDir, stateBytes);
-  if (!result.checks.level2.ok || !result.checks.level2.wrapper.ok) return result;
-  result.level = 2;
+  const work = result.checks.level1.dir;
+  try {
+    result.checks.level2 = await levelTwo(work, stateBytes);
+    if (!result.checks.level2.ok || !result.checks.level2.wrapper.ok) return result;
+    result.level = 2;
 
-  if (level >= 3) {
-    result.checks.level3 = levelThree(bundleDir, { compactBin });
-    if (!result.checks.level3.ok) return result;
-    result.level = 3;
-  }
-
-  if (circuit) {
-    try {
-      const { value, text } = await executeCircuit({ bundleDir, stateBytes, circuitName: circuit, args });
-      result.execution = { circuit, args, ok: true, value, text };
-    } catch (e) {
-      result.execution = { circuit, args, ok: false, assertion: e instanceof CircuitAssertionError, message: e.message };
+    if (level >= 3) {
+      result.checks.level3 = levelThree(work, { compactBin });
+      if (!result.checks.level3.ok) return result;
+      result.level = 3;
     }
+
+    if (circuit) {
+      try {
+        const { value, text } = await executeCircuit({ bundleDir: work, stateBytes, circuitName: circuit, args });
+        result.execution = { circuit, args, ok: true, value, text };
+      } catch (e) {
+        result.execution = { circuit, args, ok: false, assertion: e instanceof CircuitAssertionError, message: e.message };
+      }
+    }
+    return result;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
-  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,10 +227,11 @@ export async function verify({ bundleDir, indexerUrl, address, eventPayload, sta
 // ---------------------------------------------------------------------------
 const USAGE = `coc-verify — execute a published contract read circuit and check it is the deployed one
 
-  verify --bundle <dir> --indexer <graphql url> --address <hex> --circuit <name> [--args ...]
-  verify --bundle <dir> --event-payload <hex> --state <hex|file> --circuit <name> [--args ...]
+  verify [--bundle-url <url> | --bundle <dir>] --indexer <graphql url> --address <hex> --circuit <name> [--args ...]
+  verify [--bundle-url <url> | --bundle <dir>] --event-payload <hex> --state <hex|file> --circuit <name> [--args ...]
 
-  --bundle <dir>          bundle directory (default: this script's directory)
+  --bundle-url <url>      URL of the bundle's index.json (default: the URL in the event)
+  --bundle <dir>          a local copy of the bundle, with its index.json, instead of a URL
   --indexer <url>         indexer GraphQL endpoint, e.g. https://host/api/v4/graphql
   --address <hex>         contract address
   --event-payload <hex>   256-byte bundle/v1 payload, instead of --indexer
@@ -197,7 +240,7 @@ const USAGE = `coc-verify — execute a published contract read circuit and chec
   --args <...>            arguments for it, one CLI token each
   --level <1|2|3>         highest level to attempt (default 2; 3 needs the pinned compiler)
   --json                  machine-readable output
-  --list                  list the circuits this bundle publishes and exit
+  --list                  list the circuits a local --bundle publishes (unverified) and exit
 
 Exit status: 0 verified; 1 a verification level failed (nothing executed);
 2 usage or input error; 3 verified, but the circuit rejected these arguments.
@@ -210,6 +253,7 @@ export function parseArgv(argv) {
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
     switch (a) {
       case '--bundle': o.bundleDir = next(); break;
+      case '--bundle-url': o.bundleUrl = next(); break;
       case '--indexer': o.indexerUrl = next(); break;
       case '--address': o.address = next(); break;
       case '--event-payload': o.eventPayloadHex = next(); break;
@@ -241,12 +285,14 @@ async function main(argv) {
   try { o = parseArgv(argv); } catch (e) { console.error(`error: ${e.message}\n\n${USAGE}`); process.exit(2); }
   if (o.help) { console.log(USAGE); return 0; }
 
-  const bundleDir = resolve(o.bundleDir ?? HERE);
-  if (!existsSync(join(bundleDir, 'out', 'compiler', 'contract-info.json'))) {
-    console.error(`error: ${bundleDir} is not a bundle (no out/compiler/contract-info.json); pass --bundle`);
-    process.exit(2);
-  }
+  if (o.bundleDir && o.bundleUrl) { console.error(`error: pass either --bundle or --bundle-url, not both\n\n${USAGE}`); return 2; }
+  const bundleDir = o.bundleDir ? resolve(o.bundleDir) : undefined;
+  if (bundleDir && !existsSync(bundleDir)) { console.error(`error: ${bundleDir} does not exist`); return 2; }
   if (o.list) {
+    if (!bundleDir || !existsSync(join(bundleDir, 'out', 'compiler', 'contract-info.json'))) {
+      console.error('error: --list reads out/compiler/contract-info.json from a local --bundle <dir>');
+      return 2;
+    }
     const info = bundleInfo(bundleDir);
     for (const c of info.circuits) {
       console.log(`${c.name}(${c.arguments.map((a) => `${a.name}: ${renderType(a.type)}`).join(', ')}): ${renderType(c['result-type'])}`);
@@ -258,6 +304,7 @@ async function main(argv) {
   try {
     result = await verify({
       bundleDir,
+      bundleUrl: o.bundleUrl,
       indexerUrl: o.indexerUrl,
       address: o.address,
       eventPayload: o.eventPayloadHex ? Buffer.from(o.eventPayloadHex.replace(/^0x/i, ''), 'hex') : undefined,
@@ -297,7 +344,6 @@ export function jsonSafe(v) {
 
 export function printReport(r) {
   const { checks } = r;
-  console.log(`bundle      : ${r.bundleDir}`);
   if (r.source.from === 'indexer') {
     console.log(`indexer     : ${r.source.indexerUrl}`);
     console.log(`contract    : ${r.source.address}`);
@@ -307,24 +353,29 @@ export function printReport(r) {
     console.log('input       : event payload and state supplied directly (no indexer)');
   }
   console.log(`event url   : ${r.event.url}`);
-  console.log(`event hash  : ${r.event.hash}`);
+  console.log(`commitment  : ${r.event.commitment}`);
+  console.log(`bundle      : ${r.bundle.location}${r.bundle.from === 'event url' ? ' (from the event)' : r.bundle.from === 'dir' ? ' (local copy)' : ''}`);
 
   const l1 = checks.level1;
-  console.log(`L1 ${l1.ok ? 'OK  ' : 'FAIL'} bundle hash ${Buffer.from(l1.actual).toString('hex')}`);
-  if (!l1.ok) {
-    console.log('     the bundle at this URL is not the one the contract committed to; nothing was executed.');
-    if (l1.npmArtifacts) {
-      console.log(`     ${l1.npmArtifacts.join(', ')} ${l1.npmArtifacts.length > 1 ? 'are' : 'is'} not part of the bundle: without ${l1.npmArtifacts.length > 1 ? 'them' : 'it'} the hash matches.`);
-      console.log('     your own `npm install` wrote it here. Delete it, or install with `npm install --no-package-lock`.');
+  if (l1.index) {
+    if (l1.indexOk) console.log(`L1 OK   ${INDEX_FILE} matches the commitment (${l1.index.files} files listed, ${l1.index.bytes} bytes)`);
+    else {
+      console.log(`L1 FAIL ${INDEX_FILE} does not match the commitment: its entries give ${l1.computed.toString('hex')}`);
+      console.log('     this is not the index the contract committed to; nothing was fetched or executed.');
     }
-    console.log('     per-file hashes, for locating the difference:');
-    for (const [p, h] of fileHashes(r.bundleDir)) console.log(`       ${h}  ${p}`);
+  }
+  if (l1.ok) {
+    console.log(`L1 OK   ${l1.files} listed files, each matches its sha256 and size (${l1.bytes} bytes${l1.requests ? `, ${l1.requests} HTTP requests` : ''})`);
+  } else if (!l1.index || l1.indexOk) {
+    console.log(`L1 FAIL ${l1.reason}`);
+    console.log('     the bundle is not the one the contract committed to, or could not be obtained; nothing was executed.');
   }
 
   if (checks.level2) {
     for (const row of checks.level2.rows) console.log(`L2 ${row.status === 'OK' ? 'OK  ' : 'FAIL'} vk ${row.circuit}${row.reason ? ` — ${row.reason}` : ''}`);
     const w = checks.level2.wrapper;
     if (w.skipped) console.log(`L2 --   wrapper binding skipped: ${w.reason}`);
+    else if (w.error) console.log(`L2 FAIL ${w.error}`);
     else for (const row of w.rows) if (row.status !== 'OK') console.log(`L2 FAIL wrapper expectedVk for ${row.circuit}: index.js expects ${row.want}, bundle ships a key hashing to ${row.got}`);
     if (!checks.level2.ok) console.log('     the bundle does not describe the contract on chain; nothing was executed.');
   }

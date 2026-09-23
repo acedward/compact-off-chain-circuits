@@ -56,16 +56,17 @@ describe.skipIf(!isBuilt())(`published reads against a simulated deployment (${i
         expect(bundle.circuits.sort()).toEqual([...PUBLISHED[example]].sort());
       });
 
-      it('the emitted event is a Misc event named bundle/v1 carrying hash ++ url (US4)', () => {
+      it('the emitted event is a Misc event named bundle/v1 carrying commitment ++ index URL (US4)', () => {
         expect(sim.eventType).toBe('misc');
         expect(sim.eventName).toBe('bundle/v1');
         expect(sim.eventAtomBytes).toBe(288);
-        const { hash, url: emitted } = parsePayload(sim.eventPayload);
-        expect(hash.equals(bundle.hash)).toBe(true);
-        expect(emitted).toBe(url);
+        const { commitment, url: emitted } = parsePayload(sim.eventPayload);
+        expect(commitment.equals(bundle.commitment)).toBe(true);
+        expect(emitted).toBe(`${url}index.json`);
+        expect(bundle.url).toBe(emitted);
       });
 
-      it('reaches Level 2: hash matches, every verifier key matches the chain', () => {
+      it('reaches Level 2: index matches the commitment, every listed file its entry, every key the chain', () => {
         expect(result.checks.level1.ok).toBe(true);
         expect(result.checks.level2.rows.every((r) => r.status === 'OK')).toBe(true);
         expect(result.checks.level2.wrapper.ok).toBe(true);

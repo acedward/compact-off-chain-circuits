@@ -3,10 +3,11 @@
 //
 // `out/contract/index.js` imports `@midnight-ntwrk/compact-runtime`. Imported in
 // place, Node resolves that specifier by walking up from the bundle's own
-// directory, so a `node_modules` folder served next to the bundle would supply
-// the runtime the circuit runs on. The bundle hash does not cover `node_modules`,
-// and no verification level inspects the runtime, so such a folder could forge
-// every result while Levels 1, 2 and 3 all pass.
+// directory, so a `node_modules` folder next to the bundle would supply the
+// runtime the circuit runs on. index.json can never list `node_modules` and Level
+// 1 copies only listed files, but no verification level inspects the runtime,
+// so a wrapper loaded in place from any directory holding such a folder could
+// forge every result while Levels 1, 2 and 3 all pass.
 //
 // Instead the wrapper is copied to a private temporary file whose runtime import
 // is pinned to the copy this tool was installed with. Nothing else in the bundle

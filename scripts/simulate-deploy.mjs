@@ -9,7 +9,8 @@
 //      a locally built state has the entry point names but no keys, so without
 //      this step Level 2 has nothing to compare against,
 //   3. mint some test data through the contract's own circuits,
-//   4. call `publishBundle(payload)` and read the emitted event back.
+//   4. call `publishBundle(payload)` and read the emitted event back, where the
+//      payload is the commitment of the bundle's index.json ++ the index URL.
 //
 // No proof is produced at any point; this is the same local execution path the
 // consumer tool uses, with writes kept instead of discarded.
@@ -17,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as rt from '@midnight-ntwrk/compact-runtime';
-import { assemblePayload, bundleHash } from '../src/hash.mjs';
+import { assemblePayload, indexCommitment, indexUrlFor, readIndexFile } from '../src/hash.mjs';
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const COIN_PK = '0'.repeat(64);
@@ -104,12 +105,16 @@ export async function deploySimulated(example, { repo = REPO, initialized = true
 
 /**
  * Deploy-simulate, publish the bundle event, and return the two consumer inputs.
- * `payload` is asserted against the payload read back out of the emitted event.
+ * The commitment is taken from the bundle's own index.json, exactly what the
+ * deployer uploads; `url` gets index.json appended if it ends in `/`, as
+ * deploy-check does. `payload` is asserted against the payload read back out of
+ * the emitted event.
  */
-export async function simulate(example, { bundleDir, url, repo = REPO, initialized = true } = {}) {
+export async function simulate(example, { bundleDir, url: requestedUrl, repo = REPO, initialized = true } = {}) {
   const { state, callCircuit, operations } = await deploySimulated(example, { repo, initialized });
-  const hash = bundleHash(bundleDir);
-  const payload = assemblePayload(hash, url);
+  const url = indexUrlFor(requestedUrl);
+  const commitment = indexCommitment(readIndexFile(bundleDir));
+  const payload = assemblePayload(commitment, url);
   const r = await callCircuit('publishBundle', Uint8Array.from(payload));
 
   const logged = r.context.events?.[0];
@@ -122,7 +127,7 @@ export async function simulate(example, { bundleDir, url, repo = REPO, initializ
   if (!eventPayload.equals(payload)) throw new Error('the emitted payload is not the payload passed in');
 
   return {
-    example, url, hash, payload, eventName, eventPayload, operations,
+    example, url, commitment, payload, eventName, eventPayload, operations,
     eventType: logged.eventType,
     eventAtomBytes: logged.data?.content?.alignment?.[0]?.value?.length,
     state: Buffer.from(state.serialize()),
@@ -146,7 +151,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   console.log(`example      : ${example}`);
   console.log(`bundle       : ${bundleDir}`);
   console.log(`event        : eventType=${s.eventType} name=${s.eventName} atom=Bytes<${s.eventAtomBytes}>`);
-  console.log(`bundle hash  : ${s.hash.toString('hex')}`);
+  console.log(`url          : ${s.url}`);
+  console.log(`commitment   : ${s.commitment.toString('hex')}`);
   console.log(`state        : ${s.state.length} bytes, ${s.operations.length} entry points with keys`);
   console.log(`wrote        : ${join(out, 'state.hex')}`);
   console.log(`               ${join(out, 'event-payload.hex')}`);

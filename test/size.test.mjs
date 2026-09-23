@@ -8,9 +8,10 @@
 // Off chain, SC-004's "<= 64 KB for one exposed circuit" is asserted against the
 // compiled artifacts, which is what that figure was measured on. A whole
 // OpenZeppelin bundle is larger, because it also carries the published source —
-// `NonFungibleToken.compact` alone is 36 KB of mostly documentation — and a copy
-// of the consumer tool. Those totals are asserted against generous ceilings and
-// printed, so a regression shows up without pinning an arbitrary number.
+// `NonFungibleToken.compact` alone is 36 KB of mostly documentation. Those
+// totals are asserted against generous ceilings and printed, so a regression
+// shows up without pinning an arbitrary number. The bundle carries no copy of
+// the verifier; its index.json is counted in the totals.
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -36,21 +37,28 @@ describe.skipIf(!isBuilt())(`footprint (${isBuilt() ? 'built' : BUILD_HINT})`, (
       outDir: join(s.dir, 'payload'), url: 'https://example.invalid/nft/',
     });
     expect(bundle.payload).toHaveLength(256);
-    expect(bundle.hash).toHaveLength(32);
+    expect(bundle.commitment).toHaveLength(32);
     const sim = await simulate('nft', { bundleDir: bundle.outDir, url: 'https://example.invalid/nft/' });
     expect(sim.eventAtomBytes).toBe(288);   // 32-byte name ++ 256-byte payload
     expect(sim.eventPayload).toHaveLength(256);
   });
 
-  it('a URL of exactly 224 bytes is accepted and 225 is refused', () => {
+  it('a final URL of exactly 224 bytes is accepted and 225 is refused, counting an appended index.json', () => {
     const base = 'https://example.invalid/';
-    const pad = (n) => base + 'a'.repeat(n - base.length - 1) + '/';
+    const named = (n) => base + 'a'.repeat(n - base.length - '/index.json'.length) + '/index.json';
+    const slashed = (n) => base + 'a'.repeat(n - base.length - 1) + '/';     // n bytes before index.json is appended
     const build = (url, name) => deployCheck({
       interfaceSrc: interfaceSrc('multi'), interfaceOut: interfaceOut('multi'), fullOut: fullOut('multi'),
       outDir: join(s.dir, name), url,
     });
-    expect(build(pad(224), 'url224').payload).toHaveLength(256);
-    expect(() => build(pad(225), 'url225')).toThrow(/224/);
+    expect(Buffer.byteLength(named(224))).toBe(224);
+    const ok = build(named(224), 'url224');
+    expect(ok.payload).toHaveLength(256);
+    expect(ok.url).toBe(named(224));
+    expect(() => build(named(225), 'url225')).toThrow(/225 bytes.*room for 224/);
+    // A directory URL: 214 bytes + "index.json" = 224 is accepted, 215 + 10 = 225 is not.
+    expect(build(slashed(214), 'dir214').url).toHaveLength(224);
+    expect(() => build(slashed(215), 'dir215')).toThrow(/with index\.json appended\) is 225 bytes/);
   });
 
   it('no bundle ships a prover key or zkir', () => {
@@ -79,8 +87,9 @@ describe.skipIf(!isBuilt())(`footprint (${isBuilt() ? 'built' : BUILD_HINT})`, (
     const artifacts = sizeOf(bundle.outDir, (f) => f.startsWith('out/') || f === 'package.json');
     const source = sizeOf(bundle.outDir, (f) => f.startsWith('src/'));
     const tool = sizeOf(bundle.outDir, (f) => f.endsWith('.mjs'));
-    console.log(`one-circuit bundle: ${bundle.bytes} B total = ${artifacts} B compiled + ${source} B published source + ${tool} B consumer tool + ${bundle.bytes - artifacts - source - tool} B readme`);
+    console.log(`one-circuit bundle: ${bundle.bytes} B total = ${artifacts} B compiled + ${source} B published source + ${bundle.indexBytes} B index.json + ${bundle.bytes - artifacts - source - bundle.indexBytes} B readme`);
 
+    expect(tool).toBe(0);                                  // no verifier copy in a bundle
     expect(bundle.circuits).toEqual(['tokenURI']);
     expect(artifacts).toBeLessThanOrEqual(64 * KB);
     expect(bundle.bytes).toBeLessThanOrEqual(192 * KB);   // see question Q2 in the plan
@@ -93,9 +102,12 @@ describe.skipIf(!isBuilt())(`footprint (${isBuilt() ? 'built' : BUILD_HINT})`, (
         outDir: join(s.dir, `size-${example}`), url: `https://example.invalid/${example}/`,
       });
       const full = sizeOf(fullOut(example), (f) => !f.endsWith('.prover'));
-      console.log(`${example}: bundle ${bundle.bytes} B (${bundle.files.length} files) vs full build without provers ${full} B`);
+      console.log(`${example}: bundle ${bundle.bytes} B (${bundle.files.length} files, index.json ${bundle.indexBytes} B listing ${bundle.index.files.length}) vs full build without provers ${full} B`);
       expect(bundle.bytes).toBeLessThanOrEqual(192 * KB);
       expect(bundle.bytes).toBeLessThan(full);
+      // index.json lists every served file but itself.
+      expect(bundle.index.files.map((f) => f.path)).toEqual(bundle.files.filter((f) => f !== 'index.json'));
+      expect(bundle.files.filter((f) => f.endsWith('.mjs'))).toEqual([]);
     });
   }
 });

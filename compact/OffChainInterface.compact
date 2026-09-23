@@ -7,8 +7,8 @@
 // The payload is assembled by the caller, because Compact has no byte
 // concatenation:
 //
-//     payload[0..32)   = sha256 of the bundle directory (see the bundle hash rule)
-//     payload[32..256) = utf8 of the bundle URL, zero padded (so URL <= 224 bytes)
+//     payload[0..32)   = the bundle commitment (JubJub multiset hash of its index)
+//     payload[32..256) = utf8 of the index.json URL, zero padded (URL <= 224 bytes)
 //
 // The circuit is impure (it emits), so the chain stores a verifier key for it
 // under the entry point name the including contract exports it as. Calling it
@@ -24,7 +24,7 @@ module OffChainInterface {
 
   /**
    * @description Commits the contract to an off-chain interface bundle.
-   * @param {Bytes<256>} payload - sha256(bundle) (32 bytes) ++ utf8(url) zero padded to 224 bytes.
+   * @param {Bytes<256>} payload - commitment (32 bytes) ++ utf8(index.json url) zero padded to 224 bytes.
    * @return {[]} - Empty tuple.
    */
   export circuit publishBundle(payload: Bytes<256>): [] {

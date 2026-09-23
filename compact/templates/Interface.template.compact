@@ -83,7 +83,7 @@ export circuit exampleRead(id: Uint<128>): Opaque<"string"> {
 //   compact compile <this file> out/interface
 //   coc-deploy-check --interface out/interface --interface-src <this file> \
 //                    --full out/full --url https://you.example/bundle/
-//   publish the printed bundle directory at that URL, verbatim
+//   upload the bundle directory as is; the event URL is its index.json
 //   call publishBundle(<printed payload>) once, from any account that can call
 //     your contract
 //

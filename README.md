@@ -78,6 +78,12 @@ For a contract author. The full procedure and a checklist are in [docs/INTEGRATI
 
 ## How to verify
 
+There are three levels of verification:
+
+- **Level 1** checks that the files are the ones the contract committed to.
+- **Level 2** checks that the bundle's `.verifier` keys match the deployed contract's.
+- **Level 3** checks that rebuilding the published source produces the on-chain keys and the exact code that runs.
+
 Use the verifier from this repository. Bundles contain no verifier code, because code supplied by the party you are checking cannot check it. One command fetches the bundle, runs every level, then the circuit:
 
 ```sh

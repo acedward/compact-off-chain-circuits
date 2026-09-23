@@ -116,7 +116,7 @@ No compiler is needed.
 ### Level 3: the source regenerates them
 
 1. Take the interface source that the bundle's `package.json` names. It must be a file the index lists.
-2. Recompile it with your installed compiler, without your `COMPACT_PATH`. Every file the compiler reads must be in the bundle and listed in the index. If your compiler's version differs from the one `package.json` pins, `verify` warns: that is the likely cause of a mismatch.
+2. Recompile it with your installed compiler, without your `COMPACT_PATH`. Every file the compiler reads must be in the bundle and listed in the index; `verify` checks this from the compiler's search trace, and fails if it does not recognise the trace. If your compiler's version differs from the one `package.json` pins, `verify` warns: that is the likely cause of a mismatch.
 3. Compare the regenerated `.verifier` files, `index.js` and `contract-info.json` with the shipped ones, byte for byte.
 4. Check that the recompile produces no key the bundle leaves out.
 
@@ -175,7 +175,7 @@ You need `compact` 0.34.0 and Node 20 or later. The example contracts take sever
 npm ci
 scripts/build.sh                  # compiles 5 example contracts and 4 interfaces, then checks keys
 node scripts/check-keys.mjs       # 25 IDENTICAL, 0 not identical
-npm test                          # 347 tests, about a minute and a half
+npm test                          # 361 tests, about two minutes
 ```
 
 The test data are OpenZeppelin's three token contracts and two registry examples, with deployments simulated locally: the contract state with its verifier keys installed, as a real deploy does. The tests check these claims (files in `test/`):
@@ -191,7 +191,7 @@ The test data are OpenZeppelin's three token contracts and two registry examples
 | The footprint is small | one 288-byte event on chain; a one-circuit bundle's compiled files fit in 64 KB | `size` |
 | Entries are found from the address alone | the ledger layout rules and key effects; discovery on flat and nested layouts, on events and on two real Stagenet states; no false positives; the index-15 state | `placement-layout`, `placement-keys`, `discover`, `events`, `operations`, `slot15`, `verify-standard`, `indexer` |
 | ZKIR v3 bundles verify | the compiler flag is recorded, and passed, only when the keys need it | `zkir-v3` |
-| The audit findings stay fixed | one case per finding of both audits, which failed before its fix | `audit-fixes`, `reaudit-fixes` |
+| The audit findings stay fixed | one case per audit finding, which failed before its fix | `audit-fixes`, `reaudit-fixes` |
 
 To run one verification by hand, on the NFT example:
 

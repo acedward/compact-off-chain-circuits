@@ -1,6 +1,8 @@
 # Live Stagenet deployment
 
-Scripts that deployed the ERC-20 example to Midnight Stagenet, published its interface bundle, and tried the other places a contract can advertise its interfaces ([../../docs/PLACEMENTS.md](../../docs/PLACEMENTS.md)). The results are in `deployment.json`. Copies of the published bundles are in `site/`: `site/erc20/`, `site/registry/{erc20,erc20-metadata}/`, `site/registry-first/{erc20,erc20-metadata}/` and `site/minocrab/erc20/`. They are published, so do not rebuild them: a rebuild with another version of this repository can change a commitment the chain holds. The bundle steps skip a bundle already recorded.
+Scripts that deployed the ERC-20 example to Midnight Stagenet and published its interface bundle. The results are in `deployment.json`. Copies of the published bundles are in `site/`: `site/erc20/`, `site/registry/{erc20,erc20-metadata}/`, `site/registry-first/{erc20,erc20-metadata}/` and `site/minocrab/erc20/`. They are published, so do not rebuild them: a rebuild with another version of this repository can change a commitment the chain holds, and a Pages deploy of `site/` must keep serving them. The bundle step skips a bundle already recorded.
+
+These deployments predate the current event name: their contracts emitted the previous one. The steps that tried the other places a contract could advertise its interface (operations metadata, registry maps, index 15, per-standard events and a MinoCrab-proven event) were removed after commit `90ad944`, together with the contracts only they used. Their records stay in `deployment.json` and their bundles in `site/`, and [../../docs/PLACEMENTS.md](../../docs/PLACEMENTS.md) describes them as alternatives studied, not delivered.
 
 ## Steps
 
@@ -20,24 +22,7 @@ The repository root needs `scripts/build.sh` to have run first, because `deploy.
 
 `../../.env` holds `STAGENET_WALLET_MNEMONIC` for a Stagenet test wallet (see `../../.env.example`). The seed is derived in memory and never logged.
 
-## Placements
-
-Each step below adds or checks one placement. They need the steps above. The registry steps need their contract and metadata interface compiled into `contracts/managed/` under the names `deploy.mjs` uses (`ERC20LiveRegistry`, `ERC20Metadata`, `ERC20LiveRegistryFirst`, `ERC20MetadataRegistryFirst`), and `reg-*` take `first` or `last` (the default).
-
-| Step | Placement | What it does |
-|---|---|---|
-| `iface-write`, `iface-read` | P2 operations metadata | the maintenance authority adds `iface/v1/erc20` to the ERC-20 contract; read it back from the indexer |
-| `iface-compat` | P2 | an ordinary session on that contract: `findDeployedContract` and a proven `totalSupply()` |
-| `iface-freeze` | P2 | a fresh copy of ERC20Live: two entries in one update, then an update and a freeze (empty committee) in one update, then a write that must be rejected |
-| `reg-contract`, `reg-bundles`, `reg-publish`, `reg-read` | P4 registry last | deploy `ERC20LiveRegistry`, write its two bundles, publish both through `publishInterface`, read the map back |
-| the same, with `first` | P3 registry first | the same for `ERC20LiveRegistryFirst`, whose bundles go to `site/registry-first/` |
-| `slot15` | P5 index 15 | a fresh copy of ERC20Live whose initial state has a registry map at index 15 of the root, then a proven `totalSupply()` |
-| `event-retrofit` | P1 event per standard | the maintenance authority adds `publishInterfaceEvent` to the ERC-20 contract, then emits `iface/v1/erc20-metadata` with it (`contracts/InterfaceEventsOnly.compact`) |
-| `minocrab-contract`, `minocrab-bundle`, `minocrab-publish` | P0, ZKIR v3 | deploy ERC20Live compiled with `--feature-zkir-v3` and MinoCrab's `publishBundle` (`MINOCRAB_OUT` points at that build), write its v3 bundle to `site/minocrab/erc20/`, publish it with a MinoCrab proof |
-
 ## Notes
 
 - `package.json` overrides `undici` to 7.16.0 for `testcontainers`. Its default `undici` 8 installs a process-wide fetch dispatcher that Node 24's built-in fetch cannot use, and every indexer response then loses its headers.
-- Stagenet limits a block to 50,000 bytes written. The full example's 19 verifier keys exceed it in one deploy, so the contract deploys with 7 circuits and gets the rest by maintenance. The same limit caps one operations-metadata entry at about 49.9 KB.
-- A deploy cannot carry an entry point without a verifier key, so operations-metadata entries are always added by maintenance.
-- midnight-js `deployContract` builds the initial state itself, so `slot15` builds the deploy transaction by hand: `createUnprovenDeployTx`, patch the state, `new ContractDeploy`, `submitTx`. The JavaScript `arrayPush` stops at 15 entries; `StateValue.decode` builds the 16th.
+- Stagenet limits a block to 50,000 bytes written. The full example's 19 verifier keys exceed it in one deploy, so the contract deploys with 7 circuits and gets the rest by maintenance.

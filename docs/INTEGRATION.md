@@ -58,9 +58,9 @@ export circuit publishBundle(payload: Bytes<256>): [] {
 ```
 
 `publishBundle` has no access control of its own. Without a check like the
-commented one, anyone who can call your contract can publish a newer bundle
-event, and consumers take the latest; at Level 2 they would then run that
-party's wrapper. To use the check, uncomment it, set `publisher` in the
+commented one, anyone who can call your contract can emit a newer
+public-interface event, and consumers take the latest; at Level 2 they would
+then run that party's wrapper. To use the check, uncomment it, set `publisher` in the
 constructor to `persistentHash<Vector<2, Bytes<32>>>([pad(32, "coc:publisher:"), secret])`
 computed off chain, and supply `publisherSecret` from your private state when
 you call `publishBundle`. The uncommented form compiles as written; any other
@@ -72,7 +72,11 @@ and re-export `publishBundle` from the contract — that is what
 interface's ledger layout correct for free.
 
 `publishBundle` is impure (it emits), so it gets a verifier key and costs one
-transaction with one proof each time you publish a bundle version.
+transaction with one proof each time you publish a bundle version. It emits the
+contract's public-interface event: a `Misc` event whose name is fixed inside the
+circuit and defined in [FORMAT.md](FORMAT.md#event), and whose payload is the
+commitment and URL described below. Do not change the name: consumers read
+only that one.
 
 ## Step 2 — write the interface source
 
@@ -139,10 +143,11 @@ argument, using whatever tooling you normally use to call your contract
 (midnight-js, a wallet, a CLI). Publishing a new bundle is another call;
 consumers take the event with the highest id.
 
-The event is one of several places to advertise the bundle. The contract's
-operations metadata, a registry map in its ledger or index 15 of its state can
-hold one entry per standard instead; [PLACEMENTS.md](PLACEMENTS.md) compares
-them, and `verify --standard <name>` reads any of them.
+A contract has one interface: its bundle publishes every circuit you make
+readable, and the newest event is the one authoritative URL. The other places
+that were studied for this pointer, such as the operations metadata or a
+registry map in the ledger, are not delivered; [PLACEMENTS.md](PLACEMENTS.md)
+describes them.
 
 ## Step 6 — what your consumers run
 
@@ -153,8 +158,9 @@ node src/verify.mjs \
   --circuit tokenURI --args 1
 ```
 
-The verifier reads the latest `bundle/v1` event, fetches the `index.json` at its
-URL (or at `--bundle-url <url>`), checks it against the commitment, then fetches
+The verifier reads the contract's latest public-interface event, fetches the
+`index.json` at its URL (or at `--bundle-url <url>`), checks it against the
+commitment, then fetches
 each listed file into a private temporary directory and checks its sha256 and
 size before anything else runs. Each file is capped at its declared size and the
 whole bundle at 64 MiB.
@@ -192,8 +198,8 @@ What they get:
   for that entry point, and every published circuit that has an entry point on
   chain ships its key. The shipped keys are the deployed keys, so a key that
   passed ties its circuit to the chain. The circuit's code is not tied: at
-  Level 2 the executed wrapper is the entry writer's code, whoever wrote the
-  entry the consumer followed. No compiler needed.
+  Level 2 the executed wrapper is the entry writer's code, that is, whoever
+  emitted the event the consumer followed. No compiler needed.
 * **Level 3** (`--level 3`, needs the `compact` toolchain, compactc 0.30.0 or
   later) — recompiling the published source, a file the index lists, with your
   installed compiler reproduces exactly the shipped keys, `index.js` and

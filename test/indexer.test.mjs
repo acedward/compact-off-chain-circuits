@@ -4,22 +4,23 @@
 // NOTE: these tests stub `fetch` with the shapes
 // `midnight-indexer/indexer-api/graphql/schema-v4.graphql` (4.4.0-rc.1) defines.
 // They pin the queries and the selection logic — pagination, filtering on the
-// event name, highest id wins, superseded ids reported — but they are NOT a
-// round trip against a running indexer, which has not been done for this
-// repository.
+// exact public-interface event name, highest id wins, superseded ids reported —
+// but they are NOT a round trip against a running indexer, which has not been
+// done for this repository.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PUBLIC_INTERFACE_EVENT } from '../src/event.mjs';
 import { decodeEventName, fetchLatestBundleEvent, fetchState } from '../src/indexer.mjs';
 
 const URL = 'https://indexer.example/api/v4/graphql';
 const ADDRESS = 'ab'.repeat(32);
-const nameHex = (s) => Buffer.concat([Buffer.from(s, 'utf8'), Buffer.alloc(32)]).subarray(0, 32).toString('hex');
+const nameHex = (s) => Buffer.concat([Buffer.from(s, 'latin1'), Buffer.alloc(32)]).subarray(0, 32).toString('hex');
 const payloadHex = (hash, url) => {
   const p = Buffer.alloc(256);
   Buffer.from(hash, 'hex').copy(p, 0);
   Buffer.from(url, 'utf8').copy(p, 32);
   return p.toString('hex');
 };
-const event = (id, url, hash = '11'.repeat(32), name = 'bundle/v1') => ({
+const event = (id, url, hash = '11'.repeat(32), name = PUBLIC_INTERFACE_EVENT) => ({
   __typename: 'MiscContractEvent', id, name: nameHex(name), payload: payloadHex(hash, url),
   transaction: { hash: 'cc'.repeat(32), block: { height: 100 + id } },
 });
@@ -39,7 +40,7 @@ describe('indexer queries (stubbed transport, not a live round trip)', () => {
   afterEach(() => { vi.unstubAllGlobals(); delete globalThis.fetch; });
 
   it('decodes the 32-byte event name', () => {
-    expect(decodeEventName(nameHex('bundle/v1'))).toBe('bundle/v1');
+    expect(decodeEventName(nameHex(PUBLIC_INTERFACE_EVENT))).toBe(PUBLIC_INTERFACE_EVENT);
     expect(decodeEventName('0x' + nameHex('schema/v1'))).toBe('schema/v1');
   });
 
@@ -62,6 +63,34 @@ describe('indexer queries (stubbed transport, not a live round trip)', () => {
     expect(await fetchLatestBundleEvent(URL, ADDRESS)).toBeNull();
   });
 
+  it('reads only the public-interface event: the previous bundle/v1 name, look-alikes and other names are ignored', async () => {
+    const look = (tail) => Buffer.concat([Buffer.from(PUBLIC_INTERFACE_EVENT, 'latin1'), Buffer.from(tail, 'latin1'), Buffer.alloc(32)]).subarray(0, 32).toString('latin1');
+    stubIndexer(() => ({
+      data: {
+        contractEvents: [
+          event(2, 'https://ours.example/', '22'.repeat(32)),
+          event(9, 'https://old.example/', '99'.repeat(32), 'bundle/v1'),                   // the previous name
+          event(8, 'https://upper.example/', '88'.repeat(32), PUBLIC_INTERFACE_EVENT.toUpperCase()),
+          event(7, 'https://short.example/', '77'.repeat(32), PUBLIC_INTERFACE_EVENT.slice(0, -1)),
+          event(6, 'https://tail.example/', '66'.repeat(32), look('\0x')),            // an interior NUL, then more bytes
+          event(5, 'https://longer.example/', '55'.repeat(32), look('x')),
+        ],
+      },
+    }));
+    const latest = await fetchLatestBundleEvent(URL, ADDRESS);
+    expect(latest.id).toBe(2);
+    expect(latest.payload.subarray(32).toString('utf8').replace(/\0+$/, '')).toBe('https://ours.example/');
+    expect(latest.supersededIds).toEqual([]);
+
+    stubIndexer(() => ({ data: { contractEvents: [event(9, 'https://old.example/', '99'.repeat(32), 'bundle/v1')] } }));
+    expect(await fetchLatestBundleEvent(URL, ADDRESS)).toBeNull();
+  });
+
+  it('accepts the name in upper-case hex, as a HexEncoded scalar may be written', async () => {
+    stubIndexer(() => ({ data: { contractEvents: [{ ...event(4, 'https://hex.example/'), name: `0x${nameHex(PUBLIC_INTERFACE_EVENT).toUpperCase()}` }] } }));
+    expect((await fetchLatestBundleEvent(URL, ADDRESS)).id).toBe(4);
+  });
+
   it('takes the highest id and lists the superseded ones (FR-016)', async () => {
     stubIndexer(() => ({
       data: {
@@ -70,6 +99,7 @@ describe('indexer queries (stubbed transport, not a live round trip)', () => {
           event(1, 'https://first.example/', '11'.repeat(32)),
           event(7, 'https://latest.example/', '77'.repeat(32)),
           event(5, 'https://other.example/', '55'.repeat(32), 'schema/v1'),   // not ours
+          event(9, 'https://previous.example/', '99'.repeat(32), 'bundle/v1'),   // the previous name: not read
         ],
       },
     }));

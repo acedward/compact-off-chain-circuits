@@ -6,10 +6,11 @@
 // fix confirmation's NITs N1 (ranged `Uint` bounds above 2^53) and N2 (a
 // positive control on the compiler's search trace) are at the end.
 //
-// As in test/audit-fixes.test.mjs, most cases advertise a bundle as
-// `iface/v1/demo` at the spare slot [15] of the real Stagenet fixture state of
+// As in test/audit-fixes.test.mjs, most cases advertise a bundle with a
+// public-interface event payload, next to the real Stagenet fixture state of
 // 294c2b6a, whose six read circuits carry the fungible interface's keys. The
-// whole supply there belongs to the demo holder's key.
+// whole supply there belongs to the demo holder's key. (Until the delivered
+// design became the event alone, they advertised it at index 15 of that state.)
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -20,8 +21,7 @@ import { promisify } from 'node:util';
 import * as rt from '@midnight-ntwrk/compact-runtime';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { deployCheck } from '../src/deployer.mjs';
-import { writeIndex } from '../src/hash.mjs';
-import { withSpareSlotRegistry } from '../src/slot15.mjs';
+import { assemblePayload, writeIndex } from '../src/hash.mjs';
 import * as executeModule from '../src/execute.mjs';
 import * as verifyModule from '../src/verify.mjs';
 import { levelThree, parseArgv, verify, wrapperBinding } from '../src/verify.mjs';
@@ -45,11 +45,10 @@ const exitStatus = (...a) => verifyModule.exitStatus(...a);
 const coerceArg = (...a) => executeModule.coerceArg(...a);
 const thrown = (fn) => { try { fn(); } catch (e) { return e; } return undefined; };
 
-/** The fixture state with `iface/v1/demo` at the spare slot, pointing at `dir`'s (re-computed) index. */
-const advertise = (dir) => {
+/** An event payload for `dir`'s (re-computed) index at DEMO_URL, and `base`, the fixture state by default. */
+const advertise = (dir, base = Buffer.from(FIXTURE, 'hex')) => {
   const { commitment } = writeIndex(dir);
-  const state = withSpareSlotRegistry(FIXTURE, { demo: { commitment, url: DEMO_URL } });
-  return { commitment, stateBytes: Buffer.from(state.serialize()) };
+  return { eventPayload: assemblePayload(commitment, DEMO_URL), stateBytes: base };
 };
 const indexJs = (dir) => join(dir, 'out', 'contract', 'index.js');
 const prepend = (dir, code) => writeFileSync(indexJs(dir), `${code}\n${readFileSync(indexJs(dir), 'utf8')}`);
@@ -63,12 +62,6 @@ const alterTotalSupply = (dir) => {
   const altered = src.replace(/(async _totalSupply_2\(context, partialProofData\) \{\n)\s*return await this\._totalSupply_0\(context, partialProofData\);/, '$1    return 42n;');
   expect(altered).not.toBe(src);
   writeFileSync(indexJs(dir), altered);
-};
-
-/** `base` (serialized state bytes) with `iface/v1/demo` at the spare slot, pointing at `dir`'s (re-computed) index. */
-const advertiseOn = (base, dir) => {
-  const { commitment } = writeIndex(dir);
-  return Buffer.from(withSpareSlotRegistry(base, { demo: { commitment, url: DEMO_URL } }).serialize());
 };
 
 // N1: the auditor's two ranged types. A double cannot hold either bound:
@@ -161,10 +154,12 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
     edit?.(dir);
     return dir;
   };
-  const stateFileFor = (dir, name) => {
+  /** The CLI's chain inputs for `dir`: the event payload in hex, and the state written to a file. */
+  const chainArgs = (dir, name) => {
+    const { eventPayload, stateBytes } = advertise(dir);
     const f = join(s.dir, `${name}.state.hex`);
-    writeFileSync(f, advertise(dir).stateBytes.toString('hex'));
-    return f;
+    writeFileSync(f, stateBytes.toString('hex'));
+    return ['--event-payload', eventPayload.toString('hex'), '--state', f];
   };
 
   // -------------------------------------------------------------------------
@@ -186,7 +181,7 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
       const saved = { equals: Buffer.prototype.equals, digest: H.digest, match: String.prototype.match };
       try {
         const x = copyOf('F1-X', (d) => prepend(d, PATCH));
-        const rx = await verify({ bundleDir: x, stateBytes: advertise(x).stateBytes, standard: 'demo', circuit: 'name' });
+        const rx = await verify({ bundleDir: x, ...advertise(x), circuit: 'name' });
         expect(rx.level).toBe(2);
         expect(rx.execution).toMatchObject({ ok: true, text: '"Off-Chain Reads Token"' });
         expect(Buffer.prototype.equals).toBe(saved.equals);
@@ -195,14 +190,14 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
         expect(globalThis.__cocPlanted).toBeUndefined();
 
         const flipped = copyOf('F1-flipped', (d) => flipKey(d, 'name'));
-        const rf = await verify({ bundleDir: flipped, stateBytes: advertise(flipped).stateBytes, standard: 'demo', circuit: 'totalSupply' });
+        const rf = await verify({ bundleDir: flipped, ...advertise(flipped), circuit: 'totalSupply' });
         expect(rf.checks.level2.rows.find((row) => row.circuit === 'name')).toMatchObject({ status: 'FAIL' });
         expect(rf.level).toBe(1);
         expect(rf.execution).toBeUndefined();
 
         if (hasCompact()) {
           const z = copyOf('F1-Z', alterTotalSupply);
-          const rz = await verify({ bundleDir: z, stateBytes: advertise(z).stateBytes, standard: 'demo', circuit: 'totalSupply', level: 3, compactBin: COMPACT });
+          const rz = await verify({ bundleDir: z, ...advertise(z), circuit: 'totalSupply', level: 3, compactBin: COMPACT });
           expect(rz.checks.level3.rows.find((row) => row.item === 'contract/index.js')).toMatchObject({ status: 'FAIL' });
           expect(rz.level).toBe(2);
           expect(rz.execution).toBeUndefined();
@@ -219,7 +214,7 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
       const dir = copyOf('F1-exit', (d) => prepend(d, 'process.exit(7);'));
       const ours = () => new Set(readdirSync(tmpdir()).filter((f) => /^coc-(exec|wrapper)-/.test(f)));
       const before = ours();
-      const r = await verify({ bundleDir: dir, stateBytes: advertise(dir).stateBytes, standard: 'demo', circuit: 'totalSupply' });
+      const r = await verify({ bundleDir: dir, ...advertise(dir), circuit: 'totalSupply' });
       expect(r.level).toBe(2);
       expect(r.execution).toMatchObject({ ok: false, assertion: false });
       expect(r.execution.message).toMatch(/execution process .*without a result/);
@@ -229,9 +224,9 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
 
     it('the wrapper\'s console output does not reach this process', async () => {
       const dir = copyOf('F1-console', (d) => prepend(d, "console.log('\\x1b[2Jverified up to level 3'); console.error('\\x1b[8m');"));
-      const r = await verify({ bundleDir: dir, stateBytes: advertise(dir).stateBytes, standard: 'demo', circuit: 'totalSupply' });
+      const r = await verify({ bundleDir: dir, ...advertise(dir), circuit: 'totalSupply' });
       expect(r.execution).toMatchObject({ ok: true, text: SUPPLY });
-      const cli = await node('verify.mjs', ['--standard', 'demo', '--state', stateFileFor(dir, 'F1-console'), '--bundle', dir, '--circuit', 'totalSupply']);
+      const cli = await node('verify.mjs', [...chainArgs(dir, 'F1-console'), '--bundle', dir, '--circuit', 'totalSupply']);
       expect(cli.code).toBe(0);
       expect(`${cli.stdout}${cli.stderr}`).not.toMatch(CONTROL);
       expect(cli.stdout.split('\n').filter((l) => l.startsWith('verified up to level'))).toEqual(['verified up to level 2 — and its verifier keys are the ones deployed on chain']);
@@ -244,12 +239,12 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
 
     it('the genuine key reads the supply; a mistyped, short or empty key is an input error, never another account', async () => {
       const dir = copyOf('F2');
-      const { stateBytes } = advertise(dir);
-      const ok = await verify({ bundleDir: dir, stateBytes, standard: 'demo', circuit: 'balanceOf', args: [`key:0x${HOLDER}`] });
+      const { eventPayload, stateBytes } = advertise(dir);
+      const ok = await verify({ bundleDir: dir, eventPayload, stateBytes, circuit: 'balanceOf', args: [`key:0x${HOLDER}`] });
       expect(ok.execution).toMatchObject({ ok: true, text: SUPPLY });
       expect(exitStatus(ok, { circuit: 'balanceOf' })).toBe(0);
       for (const bad of [`key:0x${typo}`, 'key:0xzz', 'key:0x00', `key:0x${HOLDER.slice(0, 62)}`, `key:0x${HOLDER}00`, `key:0x${HOLDER.slice(1)}`, 'key:', 'alice']) {
-        const r = await verify({ bundleDir: dir, stateBytes, standard: 'demo', circuit: 'balanceOf', args: [bad] });
+        const r = await verify({ bundleDir: dir, eventPayload, stateBytes, circuit: 'balanceOf', args: [bad] });
         expect({ bad, execution: r.execution }).toMatchObject({ bad, execution: { ok: false, inputError: true } });
         expect({ bad, status: exitStatus(r, { circuit: 'balanceOf' }) }).toEqual({ bad, status: 2 });
       }
@@ -257,8 +252,7 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
 
     it('the CLI exits 2 for the auditor\'s typo, a wrong count and an out-of-range value, and prints no value', async () => {
       const dir = copyOf('F2-cli');
-      const state = stateFileFor(dir, 'F2-cli');
-      const base = ['--standard', 'demo', '--state', state, '--bundle', dir];
+      const base = [...chainArgs(dir, 'F2-cli'), '--bundle', dir];
       const good = await node('verify.mjs', [...base, '--circuit', 'balanceOf', '--args', `key:0x${HOLDER}`]);
       expect(good.code).toBe(0);
       expect(good.stdout).toMatch(new RegExp(`^balanceOf\\(key:0x${HOLDER}\\) = ${SUPPLY}$`, 'm'));
@@ -338,11 +332,10 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
     it('(1) an empty --circuit is a usage error, a malformed request for verify(), and exitStatus goes by presence', async () => {
       expect(() => parseArgv(['--circuit', ''])).toThrow(/--circuit/);
       const dir = copyOf('F4-empty');
-      const state = stateFileFor(dir, 'F4-empty');
-      const cli = await node('verify.mjs', ['--standard', 'demo', '--state', state, '--bundle', dir, '--circuit', '']);
+      const cli = await node('verify.mjs', [...chainArgs(dir, 'F4-empty'), '--bundle', dir, '--circuit', '']);
       expect(cli.code).toBe(2);
       expect(cli.stdout).toBe('');
-      await expect(verify({ bundleDir: dir, stateBytes: advertise(dir).stateBytes, standard: 'demo', circuit: '' })).rejects.toThrow(/circuit/);
+      await expect(verify({ bundleDir: dir, ...advertise(dir), circuit: '' })).rejects.toThrow(/circuit/);
       const verified = { level: 2, requestedLevel: 2, checks: { level1: { ok: true }, level2: { ok: true, wrapper: { ok: true } } } };
       expect(exitStatus(verified, { circuit: '' })).toBe(1);
       expect(exitStatus(verified, {})).toBe(0);
@@ -353,8 +346,8 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
         mkdirSync(join(d, 'out', 'keys', 'evil.verifier'), { recursive: true });
         writeFileSync(join(d, 'out', 'keys', 'evil.verifier', 'x'), 'x');
       });
-      const { stateBytes } = advertise(dir);
-      const r = await verify({ bundleDir: dir, stateBytes, standard: 'demo', circuit: 'totalSupply' });
+      const { eventPayload, stateBytes } = advertise(dir);
+      const r = await verify({ bundleDir: dir, eventPayload, stateBytes, circuit: 'totalSupply' });
       expect(r.checks.level1.ok).toBe(true);
       expect(r.checks.level2.rows.find((row) => row.circuit === 'evil')).toMatchObject({ status: 'FAIL', reason: expect.stringMatching(/not a regular file/) });
       expect(r.execution).toBeUndefined();
@@ -367,7 +360,7 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
         expect(l3.ok).toBe(false);
         expect(l3.rows.find((row) => row.item === 'evil.verifier')).toMatchObject({ status: 'FAIL' });
       }
-      const cli = await node('verify.mjs', ['--standard', 'demo', '--state', stateFileFor(dir, 'F4-dir'), '--bundle', dir, '--json']);
+      const cli = await node('verify.mjs', [...chainArgs(dir, 'F4-dir'), '--bundle', dir, '--json']);
       expect(cli.code).toBe(1);
       expect(JSON.parse(cli.stdout).level).toBe(1);
     });
@@ -379,7 +372,7 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
         info.circuits.find((c) => c.name === 'totalSupply').arguments = [{ name: 'x', type: { 'type-name': 'Uint', maxval: 255 } }];
         writeFileSync(p, JSON.stringify(info, null, 2));
       });
-      const r = await verify({ bundleDir: dir, stateBytes: advertise(dir).stateBytes, standard: 'demo', circuit: 'totalSupply', args: ['5'], level: 3, compactBin: COMPACT });
+      const r = await verify({ bundleDir: dir, ...advertise(dir), circuit: 'totalSupply', args: ['5'], level: 3, compactBin: COMPACT });
       expect(r.checks.level3.ok).toBe(false);
       expect(r.checks.level3.rows.find((row) => row.item === 'compiler/contract-info.json')).toMatchObject({ status: 'FAIL' });
       expect(r.level).toBe(2);
@@ -404,7 +397,7 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
       writeFileSync(p, edited);
     });
     const level3 = async (dir) => {
-      const r = await verify({ bundleDir: dir, stateBytes: advertise(dir).stateBytes, standard: 'demo', circuit: 'totalSupply', level: 3, compactBin: COMPACT });
+      const r = await verify({ bundleDir: dir, ...advertise(dir), circuit: 'totalSupply', level: 3, compactBin: COMPACT });
       expect(r.checks.level1.ok).toBe(true);
       expect(r.checks.level2.ok).toBe(true);
       return r;
@@ -472,7 +465,7 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
     // otherwise pass as "read nothing".
     it('a trace that is missing fails Level 3 through verify(): nothing is executed, exit 1', async () => {
       const dir = copyOf('N2-drop');
-      const r = await verify({ bundleDir: dir, stateBytes: advertise(dir).stateBytes, standard: 'demo', circuit: 'totalSupply', level: 3, compactBin: traceStub(s.dir, 'drop') });
+      const r = await verify({ bundleDir: dir, ...advertise(dir), circuit: 'totalSupply', level: 3, compactBin: traceStub(s.dir, 'drop') });
       expect(r.checks.level2.ok).toBe(true);
       expect(r.checks.level3.ok).toBe(false);
       expect(r.checks.level3.error).toMatch(/^the compiler's search trace was not recognised/);
@@ -555,7 +548,7 @@ describe.skipIf(!isBuilt())(`F1 (D21): what the child returns (${isBuilt() ? 'bu
 });
 
 // ---------------------------------------------------------------------------
-describe('F6, F7, D23: wording', () => {
+describe('F6, F7: wording', () => {
   const read = (...p) => readFileSync(join(REPO, ...p), 'utf8');
 
   it('F6: no comment or message says a key that passed Level 2 ties the executed code to the chain', () => {
@@ -569,13 +562,6 @@ describe('F6, F7, D23: wording', () => {
 
   it('F7: P5 is among the placements that keep keys above 15 fields', () => {
     expect(read('docs', 'PLACEMENTS.md')).toContain('Only the events (P0, P1), the operations metadata (P2) and the spare slot `[15]` (P5) do.');
-  });
-
-  it('D23: the [15] priority rationale is stated for compactc contracts, with its exception', () => {
-    for (const text of [read('docs', 'PLACEMENTS.md'), read('src', 'registry.mjs')]) {
-      expect(text).toMatch(/compactc contract/);
-      expect(text).toMatch(/MinoCrab/);
-    }
   });
 });
 
@@ -601,13 +587,13 @@ describe.skipIf(!hasCompact())(`N1, N2: a scratch contract with Uint bounds abov
   });
 
   it('N1: the auditor\'s table through verify(): every value in range runs, every value out of range is refused before the wrapper (exit 2)', async () => {
-    const stateBytes = advertiseOn(ranged.base, ranged.dir);
+    const { eventPayload, stateBytes } = advertise(ranged.dir, ranged.base);
     const cases = [
       ['near', 0n, true], ['near', 2n ** 60n, true], ['near', NEAR, true], ['near', NEAR + 1n, false],
       ['wide', 2n ** 60n, true], ['wide', WIDE, true], ['wide', WIDE + 1n, false], ['wide', 2n ** 64n, false],
     ];
     for (const [circuit, v, inRange] of cases) {
-      const r = await verify({ bundleDir: ranged.dir, stateBytes, standard: 'demo', circuit, args: [v.toString()] });
+      const r = await verify({ bundleDir: ranged.dir, eventPayload, stateBytes, circuit, args: [v.toString()] });
       expect({ circuit, v, level: r.level }).toEqual({ circuit, v, level: 2 });
       const max = circuit === 'near' ? NEAR : WIDE;
       if (inRange) {
@@ -621,9 +607,10 @@ describe.skipIf(!hasCompact())(`N1, N2: a scratch contract with Uint bounds abov
   });
 
   it('N1: the CLI prints the value (exit 0) at the bound and refuses one past it (exit 2); --list spells the types exactly', async () => {
+    const { eventPayload, stateBytes } = advertise(ranged.dir, ranged.base);
     const state = join(s.dir, 'ranged.state.hex');
-    writeFileSync(state, advertiseOn(ranged.base, ranged.dir).toString('hex'));
-    const base = ['--standard', 'demo', '--state', state, '--bundle', ranged.dir];
+    writeFileSync(state, stateBytes.toString('hex'));
+    const base = ['--event-payload', eventPayload.toString('hex'), '--state', state, '--bundle', ranged.dir];
     const ok = await node('verify.mjs', [...base, '--circuit', 'near', '--args', NEAR.toString()]);
     expect(ok.code).toBe(0);
     expect(ok.stdout).toMatch(new RegExp(`^near\\(${NEAR}\\) = ${NEAR}$`, 'm'));
@@ -645,10 +632,10 @@ describe.skipIf(!hasCompact())(`N1, N2: a scratch contract with Uint bounds abov
     const text = readFileSync(p, 'utf8');
     writeFileSync(p, text.replaceAll(`"maxval": ${WIDE}`, '"maxval": 1.2e18'));
     expect(readFileSync(p, 'utf8')).not.toBe(text);
-    const stateBytes = advertiseOn(ranged.base, dir);
-    const within = await verify({ bundleDir: dir, stateBytes, standard: 'demo', circuit: 'wide', args: [WIDE.toString()] });
+    const { eventPayload, stateBytes } = advertise(dir, ranged.base);
+    const within = await verify({ bundleDir: dir, eventPayload, stateBytes, circuit: 'wide', args: [WIDE.toString()] });
     expect(within.execution).toMatchObject({ ok: true, value: WIDE });
-    const past = await verify({ bundleDir: dir, stateBytes, standard: 'demo', circuit: 'wide', args: [(WIDE + 1n).toString()] });
+    const past = await verify({ bundleDir: dir, eventPayload, stateBytes, circuit: 'wide', args: [(WIDE + 1n).toString()] });
     expect(past.execution).toMatchObject({ ok: false, inputError: true, assertion: false });
     expect(past.execution.message).toMatch(/type error: wide argument 1 /);
     expect(exitStatus(past, { circuit: 'wide' })).toBe(2);

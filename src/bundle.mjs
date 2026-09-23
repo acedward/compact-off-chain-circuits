@@ -165,8 +165,8 @@ function bundleReadme({ url, address, indexerUrl, circuits, compact }) {
 
 This directory is the off-chain interface bundle for a Midnight contract. The
 contract advertises a 32-byte commitment to \`${INDEX_FILE}\` and the URL of
-that \`${INDEX_FILE}\`, in a \`bundle/v1\` event or in one of the places the
-verifier's \`--standard\` option reads.
+that \`${INDEX_FILE}\` in its public-interface event, which its
+\`publishBundle\` circuit emits. The newest such event wins.
 
 | | |
 |---|---|
@@ -187,7 +187,7 @@ node <compact-off-chain-circuits>/src/verify.mjs --bundle-url ${url} \\
 \`\`\`
 
 Without \`--bundle-url\` the verifier takes the URL from the contract's latest
-event, or with \`--standard <name>\` from that standard's entry. It downloads \`${INDEX_FILE}\`, checks it against the commitment on chain,
+public-interface event. It downloads \`${INDEX_FILE}\`, checks it against the commitment on chain,
 then downloads each file it lists into a private temporary directory and checks
 its sha256 (Level 1). It then checks that every verifier key is the key the chain
 stores for that entry point (Level 2) and executes the circuit against the

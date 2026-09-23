@@ -116,7 +116,7 @@ No compiler is needed.
 ### Level 3: the source regenerates them
 
 1. Take the interface source that the bundle's `package.json` names. It must be a file the index lists.
-2. Recompile it with the compiler version pinned in `package.json`, without your `COMPACT_PATH`. Every file the compiler reads must be in the bundle and listed in the index.
+2. Recompile it with your installed compiler, without your `COMPACT_PATH`. Every file the compiler reads must be in the bundle and listed in the index. If your compiler's version differs from the one `package.json` pins, `verify` warns: that is the likely cause of a mismatch.
 3. Compare the regenerated `.verifier` files, `index.js` and `contract-info.json` with the shipped ones, byte for byte.
 4. Check that the recompile produces no key the bundle leaves out.
 
@@ -333,7 +333,7 @@ A sixth deployment, `5d82194fac77216360bb4be5f3879007b46858877df6d9a2c7769d2e96e
 - Node 24.9.0 (the package needs Node 20 or later)
 - the public Stagenet indexer, API v4 (reading events needs indexer 4.4.0 or later, whose contract-event API is marked beta)
 
-Checking keys and running reads needs only the contract state. Contracts compiled with `--feature-zkir-v3` work too. Level 3 relies on the compiler's `--trace-search` option, which 0.34.0 has. Keys were checked to be reproducible on exactly this toolchain; check again after upgrading.
+Checking keys and running reads needs only the contract state. Contracts compiled with `--feature-zkir-v3` work too. Level 3 relies on the compiler's `--trace-search` option, which compactc 0.30.0 and later have. Keys were checked to be reproducible on exactly this toolchain; check again after upgrading.
 
 ## License
 

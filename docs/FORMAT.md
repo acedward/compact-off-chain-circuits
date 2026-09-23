@@ -66,7 +66,7 @@ A verifier key depends only on circuit logic and on the positions and types of t
 
 ## Verification
 
-Level 1: the commitment recomputed from `index.json` equals the published one, and each listed file matches its sha256 and size. Level 2: every shipped key equals the key the contract state stores under that entry point, and every circuit the bundle publishes that has an entry point on chain ships its key. Level 3: recompiling the listed interface source with the pinned compiler, without `COMPACT_PATH` and reading only files inside the bundle that the index lists (checked from the compiler's `--trace-search` output), reproduces exactly the shipped keys, `index.js` and `contract-info.json`. The README's [How to verify](../README.md#how-to-verify) gives the steps.
+Level 1: the commitment recomputed from `index.json` equals the published one, and each listed file matches its sha256 and size. Level 2: every shipped key equals the key the contract state stores under that entry point, and every circuit the bundle publishes that has an entry point on chain ships its key. Level 3: recompiling the listed interface source with the installed compiler, without `COMPACT_PATH` and reading only files inside the bundle that the index lists (checked from the compiler's `--trace-search` output), reproduces exactly the shipped keys, `index.js` and `contract-info.json`. The compiler version in `package.json` is advisory: a different installed version is reported as the likely cause of a mismatch. The README's [How to verify](../README.md#how-to-verify) gives the steps.
 
 ## Execution
 

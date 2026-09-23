@@ -93,8 +93,8 @@ compact compile MyContract.compact            out/full
 compact compile MyContract.Interface.compact  out/interface
 ```
 
-Use the toolchain versions your deployment used. The bundle records them and
-Level 3 verification recompiles with them.
+Use the toolchain versions your deployment used. The bundle records them; Level 3
+recompiles with the verifier's installed compiler and warns when its version differs.
 
 ## Step 4 — pre-publish check and payload
 

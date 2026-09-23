@@ -202,9 +202,9 @@ node <compact-off-chain-circuits>/src/verify.mjs --bundle <this directory> \\
   --event-payload <256-byte hex> --state <state hex or file> --circuit ${circuits[0]}
 \`\`\`
 
-Add \`--level 3\` to recompile \`${compact.interface}\` with compact
-${compact.compiler}${compact.flags ? ` and \`${compact.flags.join(' ')}\`` : ''} and check that it reproduces the shipped keys and
-\`out/contract/index.js\` byte for byte.
+Add \`--level 3\` to recompile \`${compact.interface}\` with your installed compact
+(this bundle was built with ${compact.compiler}${compact.flags ? `, flags \`${compact.flags.join(' ')}\`` : ''}) and check that it reproduces the shipped
+keys, \`out/contract/index.js\` and \`out/compiler/contract-info.json\` byte for byte.
 
 ## What is here
 

@@ -133,5 +133,133 @@
         "at": "2026-09-23T11:47:07.495Z"
       }
     }
+  },
+  "ifaceCompat": {
+    "operations": 11,
+    "circuit": "totalSupply",
+    "result": "1000000000000000000000000",
+    "txId": "00ba741138bf11ce2c167752105007c21c1079863f0f2cbbf159561b9a7b36e552",
+    "txHash": "6378b17fdc4e48d2b277869ce1facbf8d621e0c3c91c866bc3155cacc7d728e9",
+    "blockHeight": 587315,
+    "status": "SucceedEntirely",
+    "at": "2026-09-23T11:58:20.093Z"
+  },
+  "frozen": {
+    "address": "84a104e1dbfab382ba9088211b4ed6fd0a5ca84460f0b7fc07d7f675a929c847",
+    "token": {
+      "name": "Off-Chain Reads Frozen Token",
+      "symbol": "OCRF",
+      "decimals": 18
+    },
+    "deploy": {
+      "txId": "000411144322ff1b0175169eb98fd5d1d98d34e2f72f66a2c46a21315e833c8f54",
+      "txHash": "096378aa1fc2f6cb40e5a986fabf12cb220a7c83f9cefdd41ff91dfdb4c99e1f",
+      "blockHeight": 587366,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T12:03:25.758Z"
+    },
+    "insert": {
+      "counter": "0",
+      "txId": "00c48938ed18cf976d746ca3cc1d170714d9d8a4215a9250c00a47d3d07e8658ed",
+      "txHash": "671f9b39ab9aa51cb3ece481cb1f35d971081f38fc6aec413d670bfbf6a229ae",
+      "blockHeight": 587369,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T12:03:44.327Z",
+      "ms": 18286
+    },
+    "updateAndFreeze": {
+      "counter": "1",
+      "txId": "009377fc3e4de5a708152d602dba3d1cc0c819dc0d017447f10d3a0939b2158010",
+      "txHash": "65070cb3cf49ea5d691557f190e50326f413af5465b035e49dd5f0fa3c0bc843",
+      "blockHeight": 587372,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T12:04:01.669Z",
+      "ms": 16829
+    },
+    "final": {
+      "authority": {
+        "committee": 0,
+        "threshold": 1,
+        "counter": "2"
+      },
+      "entries": [
+        {
+          "name": "iface/v1/erc20",
+          "blob": "{\"commitment\":\"1149cc06377e81b07787dc3a3370e18dd3006d606c7224aedff0bb85bc2acf43\",\"url\":\"https://compact-off-chain-circuits.pages.dev/registry/erc20/index.json\"}"
+        },
+        {
+          "name": "iface/v1/erc20-metadata",
+          "blob": "{\"commitment\":\"c53c75fa159d57a0741447df14037c3b6c8e293e75c2a7654807b354355c03b1\",\"url\":\"https://compact-off-chain-circuits.pages.dev/registry/erc20-metadata/index.json\"}"
+        }
+      ],
+      "at": "2026-09-23T12:06:04.760Z"
+    },
+    "attemptAfterFreeze": {
+      "accepted": false,
+      "causes": [
+        "Transaction submission error"
+      ],
+      "at": "2026-09-23T12:06:04.524Z"
+    }
+  },
+  "slot15": {
+    "address": "6bd2c5be43209ab14380a7f764d9c1823c23138cfb70f7bb0e8c6a06ab7bbd4a",
+    "token": {
+      "name": "Off-Chain Reads Slot 15 Token",
+      "symbol": "OCR15",
+      "decimals": 18
+    },
+    "fields": 7,
+    "rootEntries": 16,
+    "refs": {
+      "erc20": {
+        "url": "https://compact-off-chain-circuits.pages.dev/registry/erc20/index.json",
+        "commitment": "1149cc06377e81b07787dc3a3370e18dd3006d606c7224aedff0bb85bc2acf43",
+        "files": 17
+      },
+      "erc20-metadata": {
+        "url": "https://compact-off-chain-circuits.pages.dev/registry/erc20-metadata/index.json",
+        "commitment": "c53c75fa159d57a0741447df14037c3b6c8e293e75c2a7654807b354355c03b1",
+        "files": 14
+      }
+    },
+    "deploy": {
+      "txId": "00f7bc013b6210c0c7fb2c05082aede2e34df047387aa71b2b80781b1d38c9dacf",
+      "txHash": "a163f963ff3e98a1a920f7574b12a54923db20582a69f2359e1d2c96474e8d66",
+      "blockHeight": 587459,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T12:12:46.577Z"
+    },
+    "call": {
+      "circuit": "totalSupply",
+      "result": "1000000000000000000000000",
+      "txId": "00c537329d53e04b9f8b4070dbf66623123d8f51a785b85b5e195f9c719d2594c4",
+      "txHash": "240491b7225b999a49eb721b2a28ab2b7dd332d17379e7dcccabb206c43c83e8",
+      "blockHeight": 587463,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T12:13:09.479Z"
+    }
+  },
+  "eventRetrofit": {
+    "insert": {
+      "circuit": "publishInterfaceEvent",
+      "txId": "007113f5a2ca91ba8c6d3b6d9e6a26d6bcd7eb5ec9f9347953c913ede94492f191",
+      "txHash": "011b10f9be50afbabfab074c7690dece4c8c60766a1b8294d4d035ab8b856b61",
+      "blockHeight": 587585,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T12:25:20.093Z",
+      "ms": 20351
+    },
+    "emit": {
+      "name": "iface/v1/erc20-metadata",
+      "commitment": "c53c75fa159d57a0741447df14037c3b6c8e293e75c2a7654807b354355c03b1",
+      "url": "https://compact-off-chain-circuits.pages.dev/registry/erc20-metadata/index.json",
+      "txId": "009c76b6fd6b1c2533dff695d6d07ee5ebdb1e60d06d21ab19b6288e251973cc0e",
+      "txHash": "bf218268d9b6f383a06f32520914764756c769f72f31de4da9dbf95bcdc858a6",
+      "blockHeight": 587590,
+      "status": "SucceedEntirely",
+      "at": "2026-09-23T12:25:50.930Z",
+      "ms": 29566
+    }
   }
 }

@@ -139,6 +139,11 @@ argument, using whatever tooling you normally use to call your contract
 (midnight-js, a wallet, a CLI). Publishing a new bundle is another call;
 consumers take the event with the highest id.
 
+The event is one of several places to advertise the bundle. The contract's
+operations metadata, a registry map in its ledger or index 15 of its state can
+hold one entry per standard instead; [PLACEMENTS.md](PLACEMENTS.md) compares
+them, and `verify --standard <name>` reads any of them.
+
 ## Step 6 — what your consumers run
 
 ```sh

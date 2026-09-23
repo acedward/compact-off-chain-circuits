@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+// Placement P1 added to an already deployed contract.
+//
+// publishInterfaceEvent reads no ledger field, so its verifier key is the same in
+// every contract. The maintenance authority inserts that key into the live ERC-20
+// contract, and midnight-js calls the circuit there through this compiled contract,
+// which defines nothing else.
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+import "../../../compact/registry/InterfaceEvents" prefix InterfaceEvents_;
+
+export circuit publishInterfaceEvent(name: Bytes<32>, payload: Bytes<256>): [] {
+  return InterfaceEvents_publishInterfaceEvent(name, payload);
+}

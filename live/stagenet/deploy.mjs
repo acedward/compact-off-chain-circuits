@@ -246,6 +246,231 @@ async function stepIfaceRead() {
   log('iface.read', { block: data.contractAction.transaction.block.height, operations: cs.operations().length, found });
 }
 
+// An ordinary midnight-js session against the contract that now carries an IR-only entry
+// point: findDeployedContract checks the local keys, then a circuit is proven and submitted.
+async function stepIfaceCompat() {
+  if (!record.ifaceMetadata?.erc20) throw new Error('write the operations-metadata entry first (iface-write)');
+  await withContract(async ({ providers, compiledContract }) => {
+    const before = await providers.publicDataProvider.queryContractState(record.address);
+    const operations = before.operations().map(String);
+    if (!operations.includes('iface/v1/erc20')) throw new Error('iface/v1/erc20 is not on the contract');
+    const contract = await findDeployedContract(providers, { compiledContract, contractAddress: record.address, privateStateId: PRIVATE_STATE_ID });
+    const started = Date.now();
+    const r = await contract.callTx.totalSupply();
+    record.ifaceCompat = { operations: operations.length, circuit: 'totalSupply', result: String(r.private.result), ...txRecord(r.public) };
+    save();
+    log('iface.compat', { operations, result: String(r.private.result), txHash: r.public.txHash, blockHeight: Number(r.public.blockHeight), status: String(r.public.status), ms: Date.now() - started });
+  });
+}
+
+// Full lifecycle on a fresh copy of ERC20Live: two standards, an update, then a freeze.
+// A deploy cannot carry an entry point without a verifier key (the ledger rejects it with
+// VerifierKeyNotSet), so a contract that wants no maintenance authority adds its entries
+// first and then hands the authority to an empty committee, which nobody can sign for.
+// The bundles are address-independent, so the ones already hosted serve this contract too.
+const FROZEN_TOKEN = { name: 'Off-Chain Reads Frozen Token', symbol: 'OCRF', decimals: 18n };
+
+async function checkHosted(ref) {
+  const { readIndex, materialize } = await import(pathToFileURL(join(REPO, 'src', 'fetch.mjs')).href);
+  const { commitment, encodePoint, indexEntries } = await import(pathToFileURL(join(REPO, 'src', 'hash.mjs')).href);
+  const { index } = await readIndex({ url: ref.url });
+  const hosted = hex(encodePoint(commitment(indexEntries(index))));
+  if (hosted !== ref.commitment) throw new Error(`${ref.url} commits to ${hosted}, expected ${ref.commitment}`);
+  const got = await materialize({ index, url: ref.url });
+  rmSync(got.dir, { recursive: true, force: true });
+}
+
+async function maintain(providers, address, updates) {
+  const contractState = await providers.publicDataProvider.queryContractState(address);
+  const signingKey = await providers.privateStateProvider.getSigningKey(address);
+  if (!signingKey) throw new Error('maintenance signing key not found in the private state store');
+  const counter = contractState.maintenanceAuthority.counter;
+  const update = new ledger.MaintenanceUpdate(address, updates(counter), counter);
+  const signed = update.addSignature(0n, ledger.signData({ tag: signingKey.tag, value: signingKey.value }, update.dataToSign));
+  const unprovenTx = ledger.Transaction.fromParts(getNetworkId(), undefined, undefined, ledger.Intent.new(new Date(Date.now() + 3600_000)).addMaintenanceUpdate(signed));
+  const started = Date.now();
+  const r = await submitTx(providers, { unprovenTx });
+  return { counter: String(counter), ...txRecord(r), ms: Date.now() - started };
+}
+
+async function waitForCounter(providers, address, counter) {
+  for (let i = 0; i < 30; i += 1) {
+    const s = await providers.publicDataProvider.queryContractState(address);
+    if (s.maintenanceAuthority.counter >= counter) return;
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  throw new Error(`maintenance counter of ${address} did not reach ${counter}`);
+}
+
+async function stepIfaceFreeze() {
+  if (!record.bundle || !record.registry?.bundles?.erc20) throw new Error('needs the 00021 bundle and the registry bundles');
+  const refs = {
+    erc20: { commitment: record.bundle.commitment, url: record.bundle.url },
+    erc20Updated: { commitment: record.registry.bundles.erc20.commitment, url: record.registry.bundles.erc20.url },
+    metadata: { commitment: record.registry.bundles['erc20-metadata'].commitment, url: record.registry.bundles['erc20-metadata'].url },
+  };
+  for (const ref of Object.values(refs)) await checkHosted(ref);
+  log('frozen.hosted.ok', { bundles: Object.keys(refs).length });
+  record.frozen ??= {};
+  const ep = ifaceEntryPoint;
+  const blob = (ref) => new Uint8Array(ifaceBlob(ref));
+  await withContract(async ({ providers, compiledContract }) => {
+    if (!record.frozen.address) {
+      const holder = { is_left: true, left: new Uint8Array(DEMO_HOLDER), right: { bytes: new Uint8Array(32) } };
+      const started = Date.now();
+      const contract = await deployContract(providers, {
+        compiledContract,
+        args: [FROZEN_TOKEN.name, FROZEN_TOKEN.symbol, FROZEN_TOKEN.decimals, holder, SUPPLY],
+        privateStateId: 'coc-erc20-frozen',
+        initialPrivateState: {},
+      });
+      const p = contract.deployTxData.public;
+      record.frozen = { address: p.contractAddress, token: { ...FROZEN_TOKEN, decimals: Number(FROZEN_TOKEN.decimals) }, deploy: txRecord(p) };
+      save();
+      log('frozen.deployed', { address: p.contractAddress, txHash: p.txHash, blockHeight: Number(p.blockHeight), ms: Date.now() - started });
+    }
+    const address = record.frozen.address;
+    providers.privateStateProvider.setContractAddress?.(address);
+    if (!record.frozen.insert) {
+      record.frozen.insert = await maintain(providers, address, () => [
+        new ledger.IrInsert(ep('erc20'), blob(refs.erc20)),
+        new ledger.IrInsert(ep('erc20-metadata'), blob(refs.metadata)),
+      ]);
+      save();
+      log('frozen.insert', record.frozen.insert);
+    }
+    if (!record.frozen.updateAndFreeze) {
+      await waitForCounter(providers, address, 1n);
+      // IrInsert refuses an entry point that already has IR, so an update is remove + insert.
+      record.frozen.updateAndFreeze = await maintain(providers, address, (counter) => [
+        new ledger.IrRemove(ep('erc20')),
+        new ledger.IrInsert(ep('erc20'), blob(refs.erc20Updated)),
+        new ledger.ReplaceAuthority(new ledger.ContractMaintenanceAuthority([], 1, counter + 1n)),
+      ]);
+      save();
+      log('frozen.updateAndFreeze', record.frozen.updateAndFreeze);
+    }
+    if (!record.frozen.attemptAfterFreeze) {
+      await waitForCounter(providers, address, 2n);
+      try {
+        const r = await maintain(providers, address, () => [new ledger.IrRemove(ep('erc20-metadata'))]);
+        record.frozen.attemptAfterFreeze = { accepted: true, ...r };
+      } catch (error) {
+        const causes = [];
+        for (let e = error, i = 0; e && i < 8; e = e.cause, i += 1) causes.push(String(e?.message ?? e).split('\n')[0].slice(0, 400));
+        record.frozen.attemptAfterFreeze = { accepted: false, causes, at: new Date().toISOString() };
+      }
+      save();
+      log('frozen.attemptAfterFreeze', record.frozen.attemptAfterFreeze);
+    }
+    const s = await providers.publicDataProvider.queryContractState(address);
+    const authority = { committee: s.maintenanceAuthority.committee.length, threshold: s.maintenanceAuthority.threshold, counter: String(s.maintenanceAuthority.counter) };
+    const entries = s.operations().map(String).filter((n) => n.startsWith('iface/v1/')).map((name) => {
+      const raw = Buffer.from(ledger.ContractState.deserialize(s.serialize()).operation(name).serialize());
+      const at = raw.indexOf(Buffer.from(IFACE_MAGIC));
+      return { name, blob: raw.subarray(at + IFACE_MAGIC.length).toString('utf8') };
+    });
+    record.frozen.final = { authority, entries, at: new Date().toISOString() };
+    save();
+    log('frozen.final', record.frozen.final);
+  });
+}
+
+// Placement P1 added to the deployed 00021 contract. publishInterfaceEvent reads no ledger
+// field, so its key is the same in every contract: the maintenance authority inserts it, and
+// midnight-js calls it through a compiled contract that defines only that circuit.
+const EVENTS_OUT = join(HERE, 'contracts', 'managed', 'InterfaceEventsOnly');
+
+async function stepEventRetrofit() {
+  if (!record.address || !record.registry?.bundles?.['erc20-metadata']) throw new Error('needs the 00021 contract and the registry bundles');
+  const standard = 'erc20-metadata';
+  const ref = record.registry.bundles[standard];
+  await checkHosted(ref);
+  record.eventRetrofit ??= {};
+  await withContract(async ({ providers, compiledContract }) => {
+    providers.privateStateProvider.setContractAddress?.(record.address);
+    if (!record.eventRetrofit.insert) {
+      const vk = new Uint8Array(readFileSync(join(EVENTS_OUT, 'keys', 'publishInterfaceEvent.verifier')));
+      const started = Date.now();
+      const r = await submitInsertVerifierKeyTx(providers, compiledContract, record.address, 'publishInterfaceEvent', vk);
+      record.eventRetrofit.insert = { circuit: 'publishInterfaceEvent', ...txRecord(r), ms: Date.now() - started };
+      save();
+      log('retrofit.insert', record.eventRetrofit.insert);
+    }
+    if (!record.eventRetrofit.emit) {
+      const contract = await findDeployedContract(providers, { compiledContract, contractAddress: record.address, privateStateId: PRIVATE_STATE_ID });
+      const payload = Buffer.alloc(256);
+      Buffer.from(ref.commitment, 'hex').copy(payload, 0);
+      Buffer.from(ref.url, 'utf8').copy(payload, 32);
+      const started = Date.now();
+      const r = await contract.callTx.publishInterfaceEvent(pad32(`iface/v1/${standard}`), new Uint8Array(payload));
+      record.eventRetrofit.emit = { name: `iface/v1/${standard}`, commitment: ref.commitment, url: ref.url, ...txRecord(r.public), ms: Date.now() - started };
+      save();
+      log('retrofit.emit', record.eventRetrofit.emit);
+    }
+  }, { outDir: EVENTS_OUT });
+}
+
+// Spare slot 15: compactc groups at most 15 fields per array, so index 15 of the root array
+// is never used, while Ledger v9 allows 16 entries. A deployer can build the initial state
+// with a registry map there. Arrays cannot grow after deployment, so it happens at deploy;
+// no compactc circuit can write it later. The compactc circuits keep their keys.
+const SLOT15_TOKEN = { name: 'Off-Chain Reads Slot 15 Token', symbol: 'OCR15', decimals: 18n };
+const stripZeros = (bytes) => { let n = bytes.length; while (n > 0 && bytes[n - 1] === 0) n -= 1; return bytes.subarray(0, n); };
+const BYTES32 = { tag: 'atom', value: { tag: 'bytes', length: 32 } };
+
+/** A Map<Bytes<32>, InterfaceRef { commitment: Bytes<32>, url: Opaque<"string"> }> in compactc's encoding. */
+function registryMapValue(refs) {
+  const content = new Map();
+  for (const [standard, ref] of Object.entries(refs)) {
+    content.set(
+      { value: [stripZeros(pad32(`iface/v1/${standard}`))], alignment: [BYTES32] },
+      { tag: 'cell', content: { value: [stripZeros(new Uint8Array(Buffer.from(ref.commitment, 'hex'))), new Uint8Array(Buffer.from(ref.url, 'utf8'))], alignment: [BYTES32, { tag: 'atom', value: { tag: 'compress' } }] } },
+    );
+  }
+  return { tag: 'map', content };
+}
+
+async function stepSlot15() {
+  if (!record.registry?.bundles?.erc20) throw new Error('needs the registry bundles');
+  const refs = { erc20: record.registry.bundles.erc20, 'erc20-metadata': record.registry.bundles['erc20-metadata'] };
+  for (const ref of Object.values(refs)) await checkHosted(ref);
+  record.slot15 ??= {};
+  const { createUnprovenDeployTx } = await import('@midnight-ntwrk/midnight-js-contracts');
+  const { sampleSigningKey } = await import('@midnight-ntwrk/midnight-js-protocol/compact-runtime');
+  await withContract(async ({ providers, compiledContract }) => {
+    if (!record.slot15.address) {
+      const holder = { is_left: true, left: new Uint8Array(DEMO_HOLDER), right: { bytes: new Uint8Array(32) } };
+      const signingKey = sampleSigningKey();
+      const data = await createUnprovenDeployTx(providers, { compiledContract, args: [SLOT15_TOKEN.name, SLOT15_TOKEN.symbol, SLOT15_TOKEN.decimals, holder, SUPPLY], signingKey });
+      const state = ledger.ContractState.deserialize(data.public.initialContractState.serialize());
+      const fields = state.data.state.asArray();
+      const entries = fields.map((v) => v.encode());
+      while (entries.length < 15) entries.push({ tag: 'null' });
+      entries.push(registryMapValue(refs));
+      // arrayPush stops at 15 entries (a check in the JavaScript binding); decode builds any valid array.
+      state.data = new ledger.ChargedState(ledger.StateValue.decode({ tag: 'array', content: entries }));
+      const deploy = new ledger.ContractDeploy(state);
+      const unprovenTx = ledger.Transaction.fromParts(getNetworkId(), undefined, undefined, ledger.Intent.new(new Date(Date.now() + 3600_000)).addDeploy(deploy));
+      const started = Date.now();
+      const r = await submitTx(providers, { unprovenTx });
+      providers.privateStateProvider.setContractAddress?.(deploy.address);
+      await providers.privateStateProvider.setSigningKey(deploy.address, signingKey);
+      record.slot15 = { address: deploy.address, token: { ...SLOT15_TOKEN, decimals: Number(SLOT15_TOKEN.decimals) }, fields: fields.length, rootEntries: entries.length, refs, deploy: txRecord(r) };
+      save();
+      log('slot15.deployed', { address: deploy.address, rootEntries: entries.length, txHash: r.txHash, blockHeight: Number(r.blockHeight), status: String(r.status), ms: Date.now() - started });
+    }
+    if (!record.slot15.call) {
+      const contract = await findDeployedContract(providers, { compiledContract, contractAddress: record.slot15.address, privateStateId: 'coc-erc20-slot15', initialPrivateState: {} });
+      const started = Date.now();
+      const r = await contract.callTx.totalSupply();
+      record.slot15.call = { circuit: 'totalSupply', result: String(r.private.result), ...txRecord(r.public) };
+      save();
+      log('slot15.call', { result: String(r.private.result), txHash: r.public.txHash, blockHeight: Number(r.public.blockHeight), status: String(r.public.status), ms: Date.now() - started });
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 00022 placement P4: registry map declared as the contract's last ledger field
 // ---------------------------------------------------------------------------
@@ -333,7 +558,7 @@ async function stepRegRead() {
   log('reg.read', { block: data.contractAction.transaction.block.height, lastLeaf: v.type(), entries });
 }
 
-const steps = { 'reg-contract': stepRegContract, 'reg-bundles': stepRegBundles, 'reg-publish': stepRegPublish, 'reg-read': stepRegRead, contract: stepContract, circuits: stepCircuits, bundle: stepBundle, publish: stepPublish, 'iface-write': stepIfaceWrite, 'iface-read': stepIfaceRead };
+const steps = { 'reg-contract': stepRegContract, 'reg-bundles': stepRegBundles, 'reg-publish': stepRegPublish, 'reg-read': stepRegRead, contract: stepContract, circuits: stepCircuits, bundle: stepBundle, publish: stepPublish, 'iface-write': stepIfaceWrite, 'iface-read': stepIfaceRead, 'iface-compat': stepIfaceCompat, 'iface-freeze': stepIfaceFreeze, slot15: stepSlot15, 'event-retrofit': stepEventRetrofit };
 const step = process.argv[2];
 if (!steps[step]) { console.error(`usage: deploy.mjs ${Object.keys(steps).join('|')}`); process.exit(2); }
 await steps[step]();

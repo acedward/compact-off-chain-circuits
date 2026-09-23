@@ -140,5 +140,9 @@ async function main(argv) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  process.exit(await main(process.argv.slice(2)));
+  // Nothing reaches Node's default handler, which would print chain or indexer
+  // bytes unescaped.
+  let code;
+  try { code = await main(process.argv.slice(2)); } catch (e) { console.error(`error: ${printable(String(e?.message ?? e))}`); code = 2; }
+  process.exit(code);
 }

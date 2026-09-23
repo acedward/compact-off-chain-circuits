@@ -112,7 +112,7 @@ describe.skipIf(!isBuilt())(`F1, F2, F5: the executed circuit and bundle code ($
       const { rmSync } = await import('node:fs');
       rmSync(join(b.outDir, 'out', 'keys', 'balanceOf.verifier'));
       const { stateBytes } = advertise(b.outDir);
-      const r = await verify({ bundleDir: b.outDir, stateBytes, standard: 'demo', circuit: 'balanceOf', args: ['0x00'], level: 3, compactBin: COMPACT });
+      const r = await verify({ bundleDir: b.outDir, stateBytes, standard: 'demo', circuit: 'balanceOf', args: [`0x${'00'.repeat(32)}`], level: 3, compactBin: COMPACT });
       expect(r.checks.level2.ok).toBe(false);
       expect(r.checks.level2.rows.find((row) => row.circuit === 'balanceOf')).toMatchObject({ status: 'FAIL' });
       expect(r.execution).toBeUndefined();

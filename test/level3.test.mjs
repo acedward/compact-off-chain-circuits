@@ -22,12 +22,12 @@ describe.skipIf(!hasCompact() || !isBuilt())(`Level 3 — recompiling the publis
   });
 
   for (const example of EXAMPLES) {
-    it(`${example}: the bundle's own source reproduces every key and index.js`, () => {
+    it(`${example}: the bundle's own source reproduces every key, index.js and contract-info.json`, () => {
       const bundle = bundleFor(example, `l3-${example}`);
       const l3 = levelThree(bundle.outDir, { compactBin: COMPACT });
       expect(l3.error).toBeUndefined();
       expect(l3.rows.map((r) => r.item).sort()).toEqual(
-        [...bundle.circuits.map((c) => `${c}.verifier`), 'contract/index.js'].sort(),
+        [...bundle.circuits.map((c) => `${c}.verifier`), 'contract/index.js', 'compiler/contract-info.json'].sort(),
       );
       expect(l3.rows.filter((r) => r.status !== 'OK')).toEqual([]);
       expect(l3.ok).toBe(true);

@@ -11,7 +11,10 @@ import { deployCheck } from '../src/deployer.mjs';
 import { parsePayload } from '../src/hash.mjs';
 import { verify } from '../src/verify.mjs';
 import { simulate } from '../scripts/simulate-deploy.mjs';
-import { BUILD_HINT, PUBLISHED, fullOut, interfaceOut, interfaceSrc, isBuilt, scratch } from './helpers.mjs';
+import { BUILD_HINT, PUBLISHED, fullOut, interfaceOut, interfaceSrc, isBuilt, scratch, userKeyArg } from './helpers.mjs';
+
+/** The simulated accounts, named in the table below and passed as their 64-hex-digit keys. */
+const asArg = (a) => (['alice', 'bob', 'carol'].includes(a) ? userKeyArg(a) : a);
 
 /** Per example: the reads to run, and the one that must fail its precondition. */
 const READS = {
@@ -83,7 +86,7 @@ describe.skipIf(!isBuilt())(`published reads against a simulated deployment (${i
 
       for (const [circuit, args, expected] of READS[example].ok) {
         it(`executes ${circuit}(${args.join(', ')}) = ${expected}`, async () => {
-          const r = await verify({ bundleDir: bundle.outDir, eventPayload: sim.eventPayload, stateBytes: sim.state, circuit, args });
+          const r = await verify({ bundleDir: bundle.outDir, eventPayload: sim.eventPayload, stateBytes: sim.state, circuit, args: args.map(asArg) });
           expect(r.level).toBe(2);
           expect(r.execution.ok).toBe(true);
           expect(r.execution.text).toBe(expected);
@@ -116,7 +119,7 @@ describe.skipIf(!isBuilt())(`published reads against a simulated deployment (${i
       outDir: join(s.dir, 'nft-later'), url,
     });
     const sim = await simulate('nft', { bundleDir: bundle.outDir, url });
-    const before = await verify({ bundleDir: bundle.outDir, eventPayload: sim.eventPayload, stateBytes: sim.state, circuit: 'balanceOf', args: ['alice'] });
+    const before = await verify({ bundleDir: bundle.outDir, eventPayload: sim.eventPayload, stateBytes: sim.state, circuit: 'balanceOf', args: [userKeyArg('alice')] });
     expect(before.execution.text).toBe('1');
 
     // A later block: the contract mints another token to alice. Same bundle,
@@ -127,7 +130,7 @@ describe.skipIf(!isBuilt())(`published reads against a simulated deployment (${i
     await later.callCircuit('_mint', user('alice'), 8n);
     const after = await verify({
       bundleDir: bundle.outDir, eventPayload: sim.eventPayload,
-      stateBytes: Buffer.from(later.state.serialize()), circuit: 'balanceOf', args: ['alice'],
+      stateBytes: Buffer.from(later.state.serialize()), circuit: 'balanceOf', args: [userKeyArg('alice')],
     });
     expect(after.level).toBe(2);
     expect(after.execution.text).toBe('3'); // token 1 from the scenario, plus 7 and 8

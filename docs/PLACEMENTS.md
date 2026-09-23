@@ -27,9 +27,9 @@ node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql 
   --circuit name --level 3
 ```
 
-`discover` needs only `@midnight-ntwrk/compact-runtime` and `fetch`. It exits 0 when it finds an entry, 1 when it finds none, and 2 on a usage error. `verify --standard` takes the first placement that holds the standard, in this order: operations metadata, the spare root slot `[15]`, registry at the start of the ledger, registry at the end, newest event. The order follows the strongest write restriction a reader can rely on without knowing the contract: the maintenance authority, the deployer at deploy time, contract logic that may be ungated, then anyone who can call an emitting circuit. It prints the placement it used and warns when another placement holds a different entry for the same standard.
+`discover` needs only `@midnight-ntwrk/compact-runtime` and `fetch`. It exits 0 when it finds an entry, 1 when it finds none, and 2 on a usage error. `verify --standard` takes the first placement that holds the standard, in this order: operations metadata, the spare root slot `[15]`, registry at the start of the ledger, registry at the end, newest event. For a compactc contract, the order follows the strongest write restriction a reader can rely on without knowing the contract: the maintenance authority, the deployer at deploy time, contract logic that may be ungated, then anyone who can call an emitting circuit. The exception is a contract with a circuit that writes `[15]`: one the maintenance authority adds (footnote 2), or one written with MinoCrab (see [MinoCrab](#minocrab)). Such a circuit makes `[15]` as open as the circuit itself, and the order still prefers `[15]`. It prints the placement it used and warns when another placement holds a different entry for the same standard.
 
-The order decides which entry is checked, not whether to trust it: an entry is a claim by whoever could write it. `verify` runs no code from the bundle while it checks the levels. To execute a circuit it imports the bundle's `index.js`, which at Level 2 is that party's code and at Level 3 is the compiler's output for the published source. For an entry that any caller can write (P0 and P1, and P3 or P4 without a check), use `--level 3` or run `verify` isolated.
+The order decides which entry is checked, not whether to trust it: an entry is a claim by whoever could write it. `verify` runs no code from the bundle while it checks the levels. To execute a circuit it runs the bundle's `index.js` in a separate child process, never in its own, so the wrapper cannot change a later verification. That wrapper at Level 2 is that party's code and at Level 3 is the compiler's output for the published source. For an entry that any caller can write (P0 and P1, and P3 or P4 without a check), use `--level 3` or run `verify` isolated.
 
 ## Comparison
 
@@ -205,7 +205,7 @@ These are the rules the ledger placements depend on. They were measured on gener
 | 15 | nothing | nothing (16 fields regroup as `[[1],[15]]`) |
 | 16 | fields 1 to 15 | field 0 only |
 
-For a contract above 15 fields, neither ledger placement leaves its keys unchanged. Only the events (P0, P1) and the operations metadata (P2) do.
+For a contract above 15 fields, neither ledger placement leaves its keys unchanged. Only the events (P0, P1), the operations metadata (P2) and the spare slot `[15]` (P5) do.
 
 ## Discovery
 

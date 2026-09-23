@@ -23,10 +23,13 @@
 //                 bundle/v1 (P0), payload = commitment ++ url
 //
 // `selectEntry` prefers, in this order: operations, the spare slot [15],
-// ledger-first, ledger-last, event. The order follows the strongest write
-// restriction a reader can rely on without knowing the contract: the
-// maintenance authority, the deployer at deploy time, contract logic that may
-// be ungated, then anyone who can call an emitting circuit.
+// ledger-first, ledger-last, event. For a compactc contract the order follows
+// the strongest write restriction a reader can rely on without knowing the
+// contract: the maintenance authority, the deployer at deploy time, contract
+// logic that may be ungated, then anyone who can call an emitting circuit. The
+// exception is a circuit that writes [15], which no compactc circuit can do:
+// one the maintenance authority adds, or one written with MinoCrab. It makes
+// [15] as open as that circuit, and the order still prefers [15].
 //
 // Every URL must be a single-line http(s) URL of printable ASCII; anything
 // else is reported as a problem, never as an entry.

@@ -185,22 +185,26 @@ What they get:
   every file it lists matches its entry. The bundle is the deployer's
   commitment.
 * **Level 2** — every verifier key in the bundle equals the key stored on chain
-  for that entry point. The published circuits are the deployed circuits. No
+  for that entry point, and every published circuit that has an entry point on
+  chain ships its key. The published circuits are the deployed circuits. No
   compiler needed.
 * **Level 3** (`--level 3`, needs the pinned `compact` toolchain) — recompiling
-  the published source reproduces the shipped keys and `index.js` byte for byte,
+  the published source, a file the index lists, reproduces exactly the shipped
+  keys and `index.js` byte for byte,
   which binds the source and the generated wrapper to the deployed circuit and
   removes you from the trust chain.
 
 The tool prints the level it reached, and for indexer input the block height and
 transaction hash of the state it read. Its exit status is 0 when everything
-asked for verified, 1 when a verification level failed (in which case nothing was
-executed), 2 for a usage or input error, and 3 when the checks passed but the
-circuit rejected the arguments.
+asked for verified (and the circuit, if one was named, returned a value), 1 when
+a level that ran failed or the named circuit was not run, 2 for a usage or input
+error, and 3 when the checks passed but the circuit rejected the arguments. No
+code from the bundle runs before the checks pass, and only a circuit whose key
+passed Level 2 runs: a pure circuit, which has no key, is refused.
 
 Level 2 also compares the shipped keys with the `expectedVk` table the compiler
 embeds in `index.js`, which catches a bundle assembled from artifacts of two
-different compilations.
+different compilations. It reads the table as text; the file is not run.
 
 ## Checklist
 

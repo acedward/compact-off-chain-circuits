@@ -11,9 +11,10 @@
 // src/registry.mjs finds it.
 //
 // DEPLOY TIME ONLY. Arrays never grow after deployment, no compactc circuit can
-// write [15], and maintenance updates change operations, not state, so the
-// entries are fixed for the contract's life (pair it with the operations
-// metadata, P2, to supersede one). midnight-js `deployContract` builds the state
+// write [15], and maintenance updates change operations, not state. The entries
+// are fixed only once the maintenance authority is frozen or absent: until then
+// it can supersede one with operations metadata (P2), or add a circuit that
+// writes [15], such as a MinoCrab one. midnight-js `deployContract` builds the state
 // from the contract's constructor and cannot add the slot; build the deploy
 // transaction yourself:
 //

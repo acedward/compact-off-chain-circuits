@@ -1,6 +1,6 @@
 # Where a contract advertises its interfaces
 
-A contract can offer several off-chain interfaces (bundles), for example `erc20` and `erc20-metadata`. A reader that holds only the contract's address needs to find each one's commitment and `index.json` URL, then verify it with the three levels described in the [README](../README.md). This page compares the places a contract can keep that information. Each one is implemented and tested in this repository, and every number below was measured, not estimated.
+A contract can offer several off-chain interfaces (bundles), for example `erc20` and `erc20-metadata`. A reader that holds only the contract's address needs to find each one's commitment and `index.json` URL, then verify it with the three levels described in the [README](../README.md). This page compares the places a contract can keep that information. Each one is implemented and tested in this repository. Every number below was measured, except those marked as modelled or computed from a cost model.
 
 Measured with `compact` 0.34.0, `@midnight-ntwrk/compact-runtime` 0.19.0 and Ledger v9 (Midnight Stagenet).
 
@@ -29,6 +29,8 @@ node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql 
 
 `discover` needs only `@midnight-ntwrk/compact-runtime` and `fetch`. It exits 0 when it finds an entry, 1 when it finds none, and 2 on a usage error. `verify --standard` takes the first placement that holds the standard, in this order: operations metadata, the spare root slot `[15]`, registry at the start of the ledger, registry at the end, newest event. The order follows the strongest write restriction a reader can rely on without knowing the contract: the maintenance authority, the deployer at deploy time, contract logic that may be ungated, then anyone who can call an emitting circuit. It prints the placement it used and warns when another placement holds a different entry for the same standard.
 
+The order decides which entry is checked, not whether to trust it: an entry is a claim by whoever could write it. `verify` runs no code from the bundle while it checks the levels. To execute a circuit it imports the bundle's `index.js`, which at Level 2 is that party's code and at Level 3 is the compiler's output for the published source. For an entry that any caller can write (P0 and P1, and P3 or P4 without a check), use `--level 3` or run `verify` isolated.
+
 ## Comparison
 
 | | P0 `bundle/v1` event | P1 event per standard | P2 operations metadata | P3 registry first | P4 registry last | P5 spare slot 15 |
@@ -37,19 +39,21 @@ node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql 
 | Code | `compact/OffChainInterface.compact` | `compact/registry/InterfaceEvents.compact` | none (maintenance update) | `compact/registry/InterfaceRegistry.compact`, imported first | `compact/templates/RegistryAtEnd.template.compact` | `src/slot15.mjs` (patches the initial state) |
 | Standards per contract | one | many | many | many | many | many |
 | Found from | indexer events | indexer events | state | state | state | state |
-| Update / remove | supersede only | supersede only | replace or remove the entry point | `publishInterface` / `removeInterface` | `publishInterface` / `removeInterface` | neither, after deployment (2) |
-| Who can write | any caller, unless the contract restricts it | any caller, unless restricted | the maintenance authority only | any caller, unless restricted | any caller, unless restricted | the deployer, once |
-| Other circuits' keys | unchanged | unchanged | unchanged | all ledger reads change (up to 15 fields) | unchanged up to 15 fields | unchanged, for any number of fields |
+| Update / remove | supersede only | supersede only | replace or remove the entry point | `publishInterface` / `removeInterface` | `publishInterface` / `removeInterface` | not by any compactc circuit (2) |
+| Who can write | any caller, unless the contract restricts it | any caller, unless restricted | the maintenance authority only | any caller, unless restricted | any caller, unless restricted | the deployer, at deploy; later only through the maintenance authority (2) |
+| Other circuits' keys | unchanged | unchanged | unchanged | every read changes while at most 15 fields precede it; above that, it depends on the grouping | unchanged while the ledger, registry included, has at most 15 fields (14 before it) | unchanged, for any number of fields |
 | Publishing circuit prover key | 67,427,609 B | 67,441,880 B | no circuit, no proof | 279,188 B | 279,217 B | no circuit, no proof (part of the deploy) |
 | Modelled bytes written (net) | 539 (0) | 539 (0) | 273 for the live 160-byte entry (3) | 1,402 (+364) first entry | 1,402 (+364) first entry | +1,933 on the deploy for two entries (3) |
-| URL limit | 224 bytes | 224 bytes | none; one entry holds about 49.9 KB | none | none | none |
+| URL limit | 224 bytes | 224 bytes | none; one entry holds about 49.9 KB (computed) | no limit of its own (4) | no limit of its own (4) | 32,726 bytes (4) |
 | Usable on an already deployed contract | yes, if it has the circuit (1) | yes, if it has the circuit (1) | yes, if it has a maintenance authority | no, changes the layout | no, changes the layout | no, deploy time only |
 
 (1) The circuit's key is the same in every contract, so a maintenance authority can add it to a deployed contract. Done on Stagenet: the maintenance authority of `294c2b6a…07cf913` inserted the key of `publishInterfaceEvent` (block 587585), and midnight-js then called it there through `live/stagenet/contracts/InterfaceEventsOnly.compact`, a contract that defines only that circuit (block 587590).
 
-(2) No compactc circuit can address root index 15, and maintenance updates change operations, not state. To supersede a P5 entry, add a P2 entry for the same standard, which discovery prefers.
+(2) No compactc circuit can address root index 15, and maintenance updates change operations, not state. But a maintenance authority can add a circuit, and a circuit written with MinoCrab can read and write `[15]` (see [MinoCrab](#minocrab)), so a P5 entry is fixed only once the authority is frozen or absent. A maintenance authority can also supersede a P5 entry with a P2 entry for the same standard, which discovery prefers.
 
 (3) P2 and P5 write no circuit transcript, so these two figures come from the ledger-v9 1.0.0-rc.3 transaction cost model (`Transaction.cost`), not from the runtime's `gasCost`: an `IrInsert` of n bytes writes about n + 115 bytes, and the slot-15 map adds 1,933 bytes written and 976 transaction bytes to the 7-circuit ERC-20 deploy.
+
+(4) A registry value is one ledger cell, and Ledger v9 rejects a state with a cell over 32,768 bytes when it deserializes it. With a 32-byte commitment that leaves 32,726 bytes for the URL, measured on the P5 map; `src/slot15.mjs` refuses more. P3 and P4 store the same cell, but writing one that large through `publishInterface` was not tried.
 
 "Modelled bytes written" is the `gasCost` the runtime reports for a local call with its default cost model, on the populated registry examples. The event circuits write and delete the same 539 bytes, so an event changes no contract state. A second registry entry costs 1,932 bytes (+530), an update 1,940 (+8), and a removal 1,410 (−530). Stagenet's cost model may differ.
 
@@ -81,7 +85,7 @@ node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql 
 
 ## P2 — operations metadata
 
-**Where it lives.** The contract's maintenance authority adds an entry point named `iface/v1/<standard>` whose operation carries IR bytes and no verifier key, with `IrInsert` in a signed maintenance update. The bytes are `"iface/v1\n"` followed by the JSON `{"commitment":"<hex>","url":"<url>"}`. The ledger checks only the size: Stagenet's `max_contract_metadata_size` is 10,485,760 bytes per entry point, but a block allows 50,000 bytes written, which caps one entry at about 49.9 KB.
+**Where it lives.** The contract's maintenance authority adds an entry point named `iface/v1/<standard>` whose operation carries IR bytes and no verifier key, with `IrInsert` in a signed maintenance update. The bytes are `"iface/v1\n"` followed by the JSON `{"commitment":"<hex>","url":"<url>"}`. The ledger checks only the size: Stagenet's `max_contract_metadata_size` is 10,485,760 bytes per entry point, but a block allows 50,000 bytes written, which caps one entry at about 49.9 KB. That cap is computed from the ledger-v9 cost model (footnote 3); the largest entry written on Stagenet is 178 bytes. Both limits are Stagenet's live parameters, read from the indexer's `block { ledgerParameters }` at block 588220; a new ledger defaults to 50,000 bytes of metadata per entry point.
 
 **How to find it.** List `ContractState.operations()` and keep the names starting with `iface/v1/`. `ContractOperation` exposes no IR accessor in JavaScript, and `toString()` prints only `<verifier key>`, so `discover` looks for the magic in `operation(name).serialize()` and parses the one JSON object after it. In the serialization, the 160-byte blob of the live entry follows a 32-byte tag and 9 bytes of framing that include its SCALE-compact length.
 
@@ -97,7 +101,7 @@ node src/verify.mjs --standard erc20 --indexer https://<indexer>/api/v4/graphql 
 
 - *Maintenance only.* A deploy whose initial state has an operation without a verifier key is malformed ("tried to deploy …/iface/v1/erc20 without a verifier key"), so the entry point is always added after deployment.
 - *Updating.* `IrInsert` refuses an entry point that already has IR, so an update is `IrRemove` followed by `IrInsert` in one maintenance update. One update can write several standards.
-- *Freezing.* A contract that should end with no maintenance authority writes its entries first, then replaces the authority with an empty committee of threshold 1, which nobody can sign for. Both can happen in one maintenance update. Never use threshold 0: the ledger only checks that the number of signatures reaches the threshold, so zero lets anyone maintain the contract.
+- *Freezing.* A contract that should end with no maintenance authority writes its entries first, then replaces the authority with an empty committee of threshold 1, which nobody can sign for. Both can happen in one maintenance update. Never use threshold 0: the ledger only checks that the number of signatures reaches the threshold, so zero lets anyone maintain the contract. On a local ledger (ledger-v9 1.0.0-rc.3), an unsigned update to a contract with an empty committee and threshold 0 was accepted and wrote an entry point. With threshold 1 it was refused, and so was an update signed by a key outside the committee (`KeyNotInCommittee`). That is why the write attempted after the freeze on Stagenet failed; the wallet reports only a submission error.
 - *Ordinary use is unaffected.* The entry point's `verifierKey` is `undefined`. midnight-js `findDeployedContract` checks only the caller's own circuits, and a proven call on the contract succeeded with the entry present. No Compact circuit can take the name, because identifiers cannot contain `/`.
 - *History.* Each maintenance update appears in the indexer as a `ContractUpdate` action that carries the new state.
 
@@ -157,22 +161,23 @@ const tx = ledger.Transaction.fromParts(networkId, undefined, undefined,
 
 **Cost.** No circuit and no proof: the map is part of the deploy transaction. On the fungible example the serialized state grows by 976 bytes for two entries with URLs of about 70 bytes, including 8 `null`s of padding.
 
-**Update authority.** Only the deployer, once.
+**Update authority.** The deployer, at deploy time. After that no compactc circuit can write `[15]`, but a maintenance authority can supersede an entry with a P2 entry, or add a circuit that writes `[15]`, such as a MinoCrab one (see [MinoCrab](#minocrab)). So the entries are fixed only once the maintenance authority is frozen (see P2) or absent. The live P5 contract `6bd2c5be…` keeps its maintenance authority.
 
 **On Stagenet.** `6bd2c5be…7bbd4a` was deployed this way with two standards (block 587459), and an ordinary midnight-js session then proved and submitted `totalSupply()` on it (block 587463). Both entries verify to Level 3 from the public indexer. The deploy script is `live/stagenet/deploy.mjs slot15`.
 
 **Caveats.**
-- Deploy time only. Arrays keep their size after deployment, no compactc circuit can address `[15]`, and maintenance updates change operations, not state, so an entry can be neither updated nor removed. To supersede one, add a P2 entry for the same standard. A MinoCrab contract can declare a slot at that path with `LedgerMap::at_path(&[15])` and write it from a circuit (see [MinoCrab](#minocrab)).
+- Deploy time only, for compactc contracts. Arrays keep their size after deployment, no compactc circuit can address `[15]`, and maintenance updates change operations, not state, so a compactc contract cannot update or remove an entry. A maintenance authority still can, as described under Update authority. A MinoCrab contract can declare a slot at that path with `LedgerMap::at_path(&[15])` and write it from a circuit (see [MinoCrab](#minocrab)).
 - It needs a custom deploy (see above).
 - It relies on compactc keeping arrays at most 15 wide, which is true for compact 0.34.0. A compiler that filled 16-wide arrays would put a field at `[15]`.
-- The JavaScript binding's `StateValue.arrayPush` refuses a 16th entry, so the helper builds the root with `StateValue.decode`, which the runtime types as internal. The binding also builds a 17-entry array in memory, but `ContractState.deserialize` rejects it. The helper refuses a root that already has 16 entries.
+- The JavaScript binding's `StateValue.arrayPush` refuses a 16th entry, so the helper builds the root with `StateValue.decode`, which the runtime types as internal. The binding also builds a 17-entry array in memory, but `ContractState.deserialize` rejects it. The helper refuses a root that already has 16 entries, and an entry whose cell would exceed the ledger's 32,768-byte bound, which `StateValue.decode` does not check.
+- `verify --standard` ranks `[15]` above both ledger registries, so a contract that also keeps an updatable registry always gets its `[15]` entry for a standard both hold. Update such a standard through operations metadata instead.
 - Combined with P4, the P4 map is no longer the last leaf, so discovery reports only `[15]`.
 
 ## Studied, not delivered
 
 **A declared or deterministic position.** Compact has no keyword that places a ledger field at a chosen slot. The order is fixed by these rules: file imports first in import order, pre-order inside modules, then the contract's own declarations in the order written. Within compactc, import order is the only control, and it gives exactly one fixed position that does not depend on the contract: field 0, which is P3. The last field (P4) also needs no layout knowledge, but it depends on nothing being declared after it. Outside compactc's layout there is one more fixed position: root `[15]`, the same path in every compactc contract and also the state's last leaf. A deployer can claim it at deploy time (P5), and a MinoCrab contract can declare it.
 
-**Empty space.** compactc allocates no spare slot: arrays are sized exactly. The live ERC-20 state is an array of exactly 7 entries, and generated contracts of 1 to 250 fields have exactly one leaf per field. The VM keeps arrays at a fixed size, so nothing can be added after deployment. One index is never used, though: compactc fills at most 15 entries of any array, while Ledger v9 allows 16. So a deployer can claim root index 15 at deploy time, which is P5.
+**Empty space.** compactc allocates no spare slot: arrays are sized exactly. The live ERC-20 state is an array of exactly 7 entries, and generated contracts of sampled sizes from 1 to 250 fields (1, 15, 16, 17, 31 and 250 in the tests) have exactly one leaf per field. The VM keeps arrays at a fixed size, so nothing can be added after deployment. One index is never used, though: compactc fills at most 15 entries of any array, while Ledger v9 allows 16. So a deployer can claim root index 15 at deploy time, which is P5.
 
 **Places outside the ledger that do not work.** The deploy nonce behind the contract address is random and cannot be set from JavaScript (`new ContractDeploy(initialState)`). The maintenance committee holds signing keys, and planting a data-carrying key would add a signer. The contract balance holds tokens, not data. An entry point without a verifier key cannot be part of a deploy (P2).
 
@@ -206,13 +211,13 @@ For a contract above 15 fields, neither ledger placement leaves its keys unchang
 
 `src/registry.mjs` implements the steps below. The tests run them on both examples, on generated contracts of 20 and 250 fields, on the other examples, and on two captured Stagenet states.
 
-1. **Operations metadata.** For each entry point named `iface/v1/<standard>`, find `"iface/v1\n"` in the serialized operation and parse one JSON object after it. The commitment must be 64 hex characters and the URL present.
+1. **Operations metadata.** For each entry point named `iface/v1/<standard>`, find `"iface/v1\n"` in the serialized operation and parse one JSON object after it. The commitment must be 64 hex characters, and the URL a single-line `http:` or `https:` URL of printable ASCII, as in every placement.
 2. **Ledger, first and last.** From the root of the state, descend first (or last) children while the value is an array. A one-field ledger has one leaf, and it is reported once.
-3. **Registry test.** Accept the leaf only if it is a map with at least one key that, as `Bytes<32>` padded back to 32 bytes, is ASCII starting `iface/v1/`. Keys without the prefix are ignored.
+3. **Registry test.** Accept the leaf only if it is a map with at least one key whose bytes, padded back to 32, start with `iface/v1/`. Keys without the prefix are ignored.
 4. **Values.** A registry value is one cell with alignment `[bytes(32), compress]` and two atoms: the commitment with trailing zero bytes stripped (padded back to 32), then the URL's UTF-8 bytes. The struct's fields are concatenated with no tag. Map keys are one `bytes(32)` atom, also with trailing zeros stripped.
 5. **Events.** Take `Misc` events named `bundle/v1` or `iface/v1/<standard>`. The newest per name wins.
 
-A name longer than 23 bytes after the prefix, a prefixed key whose value is not an `InterfaceRef`, or an `iface/v1/` entry point without the blob is reported under "ignored" and never returned as an entry. On `examples/fungible`, `examples/nft` and `examples/multi`, discovery finds nothing. The last field of `examples/nft` is a populated map; discovery looks at it and rejects it.
+A name longer than 23 bytes after the prefix, a prefixed name with a zero, control or non-ASCII byte, a prefixed key whose value is not an `InterfaceRef`, an `iface/v1/` entry point without the blob, or a URL that is not a single-line `http(s)` URL of printable ASCII is reported under "ignored" and never returned as an entry. `discover` and `verify` escape every string that comes from the chain, the indexer or a bundle before printing it. On `examples/fungible`, `examples/nft` and `examples/multi`, discovery finds nothing. The last field of `examples/nft` is a populated map; discovery looks at it and rejects it.
 
 ## MinoCrab
 
@@ -224,7 +229,7 @@ MinoCrab is a Rust library for writing Midnight circuits; it emits ZKIR v3 and u
 - Its executor runs a circuit against a contract state with Midnight's ledger VM and no proof. Run against the live registry's state, it returned both entries.
 - It has no deploy or call tooling. A MinoCrab circuit reaches a network through a compactc `--feature-zkir-v3` build deployed with midnight-js, with MinoCrab's key and ZKIR swapped in and `compiler/contract-manifest.json` rewritten to match. A contract compiled with the default ZKIR v2 cannot use MinoCrab keys.
 
-**On Stagenet.** `5d82194f…ea0692` is `live/stagenet/contracts/ERC20Live.compact` compiled with `--feature-zkir-v3`, with MinoCrab's `publishBundle` in place of compactc's (`deploy.mjs minocrab-*`). The chain holds MinoCrab's key for `publishBundle` (`813b25cc…`) and compactc's v3 keys for the six reads. midnight-js deployed it (block 587808) and proved and submitted `publishBundle` with MinoCrab's 1.77 MB key (block 587848, `SucceedEntirely`). Proving it took about 0.3 s on the proof server, against about 7 s with compactc's 56.6 MB v3 key (measured offline). The bundle ships the v3 keys and records `--feature-zkir-v3` in its `package.json`, so Level 3 recompiles with that flag; it verifies to Level 3. The proof-server image is the stock `midnightntwrk/proof-server:9.0.0-rc.6`.
+**On Stagenet.** `5d82194f…ea0692` is `live/stagenet/contracts/ERC20Live.compact` compiled with `--feature-zkir-v3`, with MinoCrab's `publishBundle` in place of compactc's (`deploy.mjs minocrab-*`). The chain holds MinoCrab's key for `publishBundle` (`813b25cc…`) and compactc's v3 keys for the six reads. midnight-js deployed it (block 587808) and proved and submitted `publishBundle` with MinoCrab's 1.77 MB key (block 587848, `SucceedEntirely`). Proving it took 0.3 s cold and about 0.2 s warm on the proof server, against 7.0 s cold and about 2.7 s warm with compactc's 56.6 MB v3 key (measured offline). The bundle ships the v3 keys and records `--feature-zkir-v3` in its `package.json`, so Level 3 recompiles with that flag; it verifies to Level 3. The proof-server image is the stock `midnightntwrk/proof-server:9.0.0-rc.6`.
 
 The JavaScript `Transaction.wellFormed` in the npm `@midnightntwrk/ledger-v9` checks no contract proofs: its WASM is built without the ledger's `proof-verifying` feature, so a proof made with the wrong key passes it. The MinoCrab proof was checked offline with a Rust build of the ledger that verifies proofs (accepted, and a proof made with the wrong key rejected), and on chain by the node.
 

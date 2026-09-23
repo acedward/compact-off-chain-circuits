@@ -153,7 +153,7 @@ node src/verify.mjs --indexer https://<indexer>/api/v4/graphql --address <contra
   --circuit tokenURI --args 1 --level 3
 ```
 
-The bundle comes from the URL in the event. Pass `--bundle-url <url>` to fetch it from elsewhere, or `--bundle <dir>` to use a local copy. Without an indexer that serves events, pass `--event-payload <hex> --state <hex or file>` instead of `--indexer` and `--address`. `verify` stops at the first failing level and executes nothing after a failure.
+The bundle comes from the URL in the event. Pass `--bundle-url <url>` to fetch it from elsewhere, or `--bundle <dir>` to use a local copy. Without an indexer that serves events, pass `--event-payload <hex> --state <hex or file>` instead of `--indexer` and `--address`. `verify` stops at the first failing level and executes nothing after a failure. No code from the bundle runs while the levels are checked.
 
 With `--standard <name>`, `verify` takes the commitment and URL of that standard's entry wherever the contract keeps it, instead of the `bundle/v1` event. `node src/discover.mjs --indexer <url> --address <hex>` lists every entry a contract advertises.
 
@@ -168,27 +168,27 @@ With `--standard <name>`, `verify` takes the commitment and URL of that standard
 
 ### Level 2: its verifier keys are the deployed ones
 
-Read the contract state with `contractAction(address) { state }`. Compare each `out/keys/<circuit>.verifier` in the bundle, byte for byte, with the verifier key the state stores for that entry point. The key hashes the compiler embedded in `out/contract/index.js` must match too. No compiler is needed.
+Read the contract state with `contractAction(address) { state }`. Compare each `out/keys/<circuit>.verifier` in the bundle, byte for byte, with the verifier key the state stores for that entry point. Every circuit the bundle publishes that has an entry point on chain must ship its key. The key hashes the compiler embedded in `out/contract/index.js` must match too; `verify` reads them as text and does not run the file. No compiler is needed.
 
 ### Level 3: the source regenerates them
 
-Recompile the bundle's interface source with the compiler version pinned in its `package.json`. The regenerated `.verifier` files and `index.js` must equal the shipped ones byte for byte. This needs the `compact` toolchain.
+Recompile the bundle's interface source, a file its index lists, with the compiler version pinned in its `package.json`. The regenerated `.verifier` files and `index.js` must equal the shipped ones byte for byte, and the recompile must produce no key the bundle leaves out. This needs the `compact` toolchain.
 
 ### Run the circuit
 
-Once the levels pass, `verify` runs the circuit through the bundle's generated wrapper against the contract state. It prints the result, or the circuit's failed assertion. Exit status is 0 when verified, 1 when a level failed, 2 for a usage error, and 3 when verified but the circuit rejected the arguments.
+Once every requested level has passed, `verify` runs the circuit through the bundle's generated wrapper against the contract state. It prints the result, or the circuit's failed assertion. It runs only a circuit whose verifier key passed Level 2. Any other, such as a pure circuit, which has no key, is refused, because nothing ties its code to the contract. Exit status is 0 when verified and, if a circuit was named, it returned a value; 1 when a level that ran failed or the named circuit was not run; 2 for a usage error; and 3 when verified but the circuit rejected the arguments. `--level` takes 1, 2 or 3, and Levels 1 and 2 always run.
 
 ## How it works
 
 **Event.** `publishBundle` emits `Misc { name: pad(32, "bundle/v1"), payload }`. Bytes 0 to 31 of the payload are the commitment, and bytes 32 to 255 are the UTF-8 URL of `index.json`, zero padded. The caller assembles the payload because Compact has no byte concatenation. The emitting contract's address is the provenance.
 
-**Bundle.** A directory with `index.json` at its root. The index lists every other file with its `path`, `sha256` and `size`, and paths resolve relative to the index URL. The files are the partial source and the modules it imports under `src/`, one verifier key per published circuit under `out/keys/`, the generated wrapper `out/contract/index.js` with its typings, the compiler's `out/compiler/contract-info.json`, a `package.json` pinning the compiler, language and runtime versions, and a README. The example bundles are 86 to 122 KB, with a 2 to 3 KB index. The prover keys and zkir they leave out are 81 to 87 MB per example.
+**Bundle.** A directory with `index.json` at its root. The index lists every other file with its `path`, `sha256` and `size`, and paths resolve relative to the index URL. The files are the partial source and the modules it imports under `src/`, one verifier key per published circuit under `out/keys/`, the generated wrapper `out/contract/index.js` with its typings, the compiler's `out/compiler/contract-info.json`, a `package.json` pinning the compiler, language and runtime versions, and a README. The example bundles are 86 to 122 KB, with a 2 to 3 KB index. The prover keys and zkir they leave out are 81 to 87 MB per example. The generated README is one of the listed files, so rebuilding a published bundle with another version of this repository can change its commitment; keep the directory you committed to rather than rebuilding it.
 
 **Commitment.** A multiset hash on JubJub, the curve behind Compact's `JubjubPoint`. Each listed file becomes a curve point through Zcash's Sapling group hash of `sha256(path) ‖ sha256(file)`, with personalization `COC_B_v1`. The commitment is the sum of those points, encoded in 32 bytes. The order of the files does not matter, and adding or removing one is a single point addition. It deliberately does not use Compact's `hashToCurve`, which is built on Poseidon, a hash Midnight may change in a hard fork. A commitment stored on chain has to stay reproducible.
 
 **Why a partial source reproduces the keys.** A verifier key depends only on circuit logic and on the positions and types of the ledger slots the circuit reads. The compiler erases every identifier. Importing the deployed contract's module keeps its slots in the same order, so an interface exporting only some circuits compiles them to byte-identical keys. Slot order is the declaration order inside the module that owns the ledger. A ledger declared in the interface file lands after the module's slots. It leaves their paths, and so their keys, unchanged while the total stays at 15 fields or fewer; above that, Compact regroups the fields ([layout rules](docs/PLACEMENTS.md#layout-rules)).
 
-**Execution.** Levels 2 and 3 and the circuit run on the private copy of the listed files. The verifier imports the bundle's `index.js` with its runtime import pinned to the verifier's own installed `@midnight-ntwrk/compact-runtime`. It builds a circuit context over the contract state and calls the circuit, as midnight-js does before proving, and stops there. Circuits that declare witnesses take private inputs, are not reads, and are refused.
+**Execution.** Levels 2 and 3 and the circuit run on the private copy of the listed files. No bundle code runs during the checks. Only to execute a circuit whose key passed Level 2, and only after every requested level has passed, does the verifier import the bundle's `index.js`, with its runtime import pinned to the verifier's own installed `@midnight-ntwrk/compact-runtime`. It builds a circuit context over the contract state and calls the circuit, as midnight-js does before proving, and stops there. Circuits that declare witnesses take private inputs, are not reads, and are refused; so are circuits without a checked key.
 
 ## What to expect
 
@@ -223,7 +223,7 @@ node scripts/simulate-deploy.mjs nft                                      # writ
 node src/verify.mjs --bundle bundle/nft \
   --event-payload "$(cat sim/nft/event-payload.hex)" --state sim/nft/state.hex \
   --circuit tokenURI --args 1 --level 3
-npm test                          # 296 tests, about a minute and a half
+npm test                          # 322 tests, about a minute and a half
 ```
 
 The `verify` run prints two `L1 OK` lines, one for `index.json` and one for its 16 files, then five `L2 OK`, six `L3 OK` and `tokenURI(1) = "https://nft.example/meta/1.json"`. Use `fungible` instead of `nft` to read `name`, `symbol`, `decimals` and `totalSupply`, or `multi` to read `uri`. `--args 999` shows a failed assertion with exit status 3. Changing one byte of any bundle file fails Level 1 with exit status 1.
@@ -259,10 +259,10 @@ live/stagenet/                                the Stagenet deployments, their sc
 
 ## Security considerations
 
-- Who can write an entry depends on where it lives. Only the maintenance authority can write operations metadata, and nobody can once the authority is an empty committee. Any caller can write a registry map or emit an event unless the contract restricts the circuit. Index 15 is written once, by the deployer. `verify --standard` prefers operations metadata for that reason; see [docs/PLACEMENTS.md](docs/PLACEMENTS.md).
+- Who can write an entry depends on where it lives. Only the maintenance authority can write operations metadata, and nobody can once the authority is an empty committee. Any caller can write a registry map or emit an event unless the contract restricts the circuit. Index 15 is written by the deployer at deploy time, and afterwards only through the maintenance authority. `verify --standard` prefers them in that order: operations metadata, index 15, the ledger registries, then events; see [docs/PLACEMENTS.md](docs/PLACEMENTS.md).
 - Level 1 proves the bundle is the one committed by whoever last called `publishBundle`. That is the deployer only if the contract restricts the circuit, as in the commented check under How to use. Otherwise anyone can publish a newer bundle with the genuine keys and a wrapper of their own, which only Level 3 catches. Even a deployer can commit to a bundle that misdescribes the contract.
 - Level 2 proves the shipped keys are deployed. It does not prove the shipped source or `index.js` match them, because keys derive from the circuit IR. The key hashes inside `index.js` catch a bundle mixed from two compilations, not a dishonest deployer. Level 3 closes that gap; run it once per commitment.
-- Below Level 3, `index.js` is the deployer's code running on your machine. Run it isolated if you do not trust the deployer.
+- No bundle code runs while the levels are checked. Executing a circuit imports `index.js`, and below Level 3 that is the code of whoever wrote the entry, running on your machine: the deployer for the event and index 15, the maintenance authority for operations metadata, and possibly anyone for an unrestricted registry or event. With `--level 3` it runs only after the recompile has reproduced it from the published source. Run `verify` isolated, or use Level 3, if you do not trust that party.
 - The verifier fetches only the files `index.json` lists, into a private folder, and loads no code from them except the generated wrapper, whose runtime import it pins to its own runtime. Files a host adds, such as a planted `node_modules`, are never fetched; `test/fetch.test.mjs` and `test/runtime-pinning.test.mjs` cover this.
 - The commitment is binding because every group-hash point has an unknown discrete log. Deriving points by multiplying the generator by a hash would not be safe, since the sum would collapse to a sum of numbers that can be made to collide.
 - The `size` of each index entry is not part of the commitment. It only bounds downloads; every file's sha256 is checked.
@@ -273,9 +273,9 @@ live/stagenet/                                the Stagenet deployments, their sc
 
 - In an event, the URL is at most 224 bytes. The other placements have no such limit.
 - Each bundle version costs one transaction with one proof after deployment, because constructors cannot emit. The prover key for `publishBundle` is about 67 MB, larger than any token circuit's, because the 256-byte payload is decomposed byte by byte.
-- Circuits with witnesses are refused. Reads of `boundedMerkleTree` slots are untested.
+- Circuits with witnesses are refused, and so are circuits with no verifier key on chain, such as pure ones. Reads of `boundedMerkleTree` slots are untested.
 - The verifier sets no timeout and no limit on the number of files. Read What to expect before running it unattended.
-- Verified live on Stagenet for the ERC-20 example and for four placements of its entries (see Live on Stagenet). The test suite builds states locally, with verifier keys installed the way a deployment installs them.
+- Verified live on Stagenet for the ERC-20 example, all six places a contract can advertise its entries, and a MinoCrab-proven event (see Live on Stagenet). The test suite builds states locally, with verifier keys installed the way a deployment installs them.
 
 ## Compatibility
 

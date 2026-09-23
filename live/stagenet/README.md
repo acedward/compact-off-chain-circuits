@@ -1,6 +1,6 @@
 # Live Stagenet deployment
 
-Scripts that deployed the ERC-20 example to Midnight Stagenet, published its interface bundle, and tried the other places a contract can advertise its interfaces ([../../docs/PLACEMENTS.md](../../docs/PLACEMENTS.md)). The results are in `deployment.json`. Copies of the published bundles are in `site/`: `site/erc20/` and `site/registry/{erc20,erc20-metadata}/`.
+Scripts that deployed the ERC-20 example to Midnight Stagenet, published its interface bundle, and tried the other places a contract can advertise its interfaces ([../../docs/PLACEMENTS.md](../../docs/PLACEMENTS.md)). The results are in `deployment.json`. Copies of the published bundles are in `site/`: `site/erc20/`, `site/registry/{erc20,erc20-metadata}/`, `site/registry-first/{erc20,erc20-metadata}/` and `site/minocrab/erc20/`. They are published, so do not rebuild them: a rebuild with another version of this repository can change a commitment the chain holds. The bundle steps skip a bundle already recorded.
 
 ## Steps
 

@@ -6,7 +6,8 @@
 //
 // Layout produced:
 //
-//   index.json                     every other file: path, sha256, size (never itself)
+//   index.json                     every other file: path, sha256, size (never itself);
+//                                  the commitment as `hash`, and the `compiler`
 //   README.md                      endpoint, address, usage
 //   package.json                   pinned compiler/language/runtime + the one npm dep
 //   src/<...>.Interface.compact    the published (partial) source

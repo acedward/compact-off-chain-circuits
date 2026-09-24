@@ -1,6 +1,11 @@
 {
   "bundle": "v1",
   "commitment": "ecmh-jubjub-grouphash",
+  "hash": "4814bf93c6c0a6c81c7839f9be72c80365c2a4179d58171e7acd40906be30891",
+  "compiler": {
+    "name": "compactc",
+    "version": "0.34.0"
+  },
   "files": [
     {
       "path": "README.md",

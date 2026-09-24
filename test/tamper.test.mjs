@@ -4,6 +4,8 @@
 //
 //   any one-byte change to any listed file       -> Level 1 fails, naming the file
 //   any change to index.json's entries           -> Level 1 fails on the commitment
+//   index.json's hash or compiler changed        -> Level 1 fails on that field
+//     (neither is covered by the commitment)
 //   one circuit's key swapped, index rebuilt and -> Level 1 passes, Level 2 fails
 //     the commitment re-published                   and names the circuit
 //
@@ -13,7 +15,7 @@ import { appendFileSync, copyFileSync, readFileSync, rmSync, writeFileSync } fro
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { deployCheck } from '../src/deployer.mjs';
-import { writeIndex } from '../src/hash.mjs';
+import { indexCommitment, writeIndex } from '../src/hash.mjs';
 import { verify } from '../src/verify.mjs';
 import { simulate } from '../scripts/simulate-deploy.mjs';
 import { BUILD_HINT, fullOut, interfaceOut, interfaceSrc, isBuilt, scratch } from './helpers.mjs';
@@ -73,8 +75,37 @@ describe.skipIf(!isBuilt())(`tampering (${isBuilt() ? 'built' : BUILD_HINT})`, (
     writeFileSync(p, JSON.stringify(index, null, 2));
     const r = await read(bundle, sim, { circuit: 'tokenURI', args: ['1'] });
     expect(r.checks.level1.ok).toBe(false);
-    expect(r.checks.level1.indexOk).toBe(false);
-    expect(r.checks.level1.reason).toBe('index does not match the commitment');
+    expect(r.checks.level1.hashOk).toBe(true);      // the hash was left alone ...
+    expect(r.checks.level1.indexOk).toBe(false);    // ... and the entries no longer give it
+    expect(r.checks.level1.reason).toMatch(/^index\.json's entries give [0-9a-f]{64}, not its hash \(the event's commitment\)/);
+    expect(r.execution).toBeUndefined();
+  });
+
+  it('Level 1 catches an index whose hash was changed to match its altered entries', async () => {
+    const bundle = freshBundle('index-rehashed');
+    const sim = await simulate('nft', { bundleDir: bundle.outDir, url: URL });
+    const p = join(bundle.outDir, 'index.json');
+    const index = JSON.parse(readFileSync(p, 'utf8'));
+    index.files.find((f) => f.path === 'out/contract/index.js').sha256 = 'ab'.repeat(32);
+    index.hash = indexCommitment(index).toString('hex');
+    writeFileSync(p, JSON.stringify(index, null, 2));
+    const r = await read(bundle, sim, { circuit: 'tokenURI', args: ['1'] });
+    expect(r.checks.level1).toMatchObject({ ok: false, hashOk: false, file: 'index.json' });
+    expect(r.checks.level1.reason).toMatch(/is not the event's commitment: this is not the index the contract committed to$/);
+    expect(r.execution).toBeUndefined();
+  });
+
+  it('Level 1 catches a changed compiler in index.json, although the commitment does not cover it', async () => {
+    const bundle = freshBundle('index-compiler');
+    const sim = await simulate('nft', { bundleDir: bundle.outDir, url: URL });
+    const p = join(bundle.outDir, 'index.json');
+    const index = JSON.parse(readFileSync(p, 'utf8'));
+    index.compiler.version = '0.35.0';
+    writeFileSync(p, JSON.stringify(index, null, 2));
+    const r = await read(bundle, sim, { circuit: 'tokenURI', args: ['1'] });
+    expect(r.checks.level1).toMatchObject({ ok: false, hashOk: true, indexOk: true, filesOk: true, compilerOk: false });
+    expect(r.checks.level1.reason).toMatch(/compactc 0\.35\.0, but the bundle's package\.json pins compactc 0\.34\.0/);
+    expect(r.level).toBe(0);
     expect(r.execution).toBeUndefined();
   });
 
@@ -86,6 +117,7 @@ describe.skipIf(!isBuilt())(`tampering (${isBuilt() ? 'built' : BUILD_HINT})`, (
     index.files = index.files.filter((f) => f.path !== 'README.md');
     writeFileSync(p, JSON.stringify(index, null, 2));
     const r = await read(bundle, sim);
+    expect(r.checks.level1.hashOk).toBe(true);
     expect(r.checks.level1.indexOk).toBe(false);
     expect(r.level).toBe(0);
   });

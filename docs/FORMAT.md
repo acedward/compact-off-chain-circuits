@@ -19,6 +19,8 @@ A directory with `index.json` at its root:
 
 ```json
 { "bundle": "v1", "commitment": "ecmh-jubjub-grouphash",
+  "hash": "<the commitment, 64 lowercase hex>",
+  "compiler": { "name": "compactc", "version": "0.34.0" },
   "files": [ { "path": "out/keys/name.verifier", "sha256": "<64 lowercase hex>", "size": 1351 } ] }
 ```
 
@@ -33,7 +35,10 @@ The index lists every other file; each path resolves relative to the index URL. 
 
 Rules for `index.json`:
 
-- It has exactly the fields shown: no other field, at the top or in an entry.
+- It has exactly the fields shown, written in that order: no other field, at the top, in `compiler` or in an entry. The one optional field is `compiler.flags`, present only when the bundle records flags, for example `"flags": ["--feature-zkir-v3"]`.
+- `hash` is the bundle's commitment (see Commitment), as 64 lowercase hex digits: a reader can compare it with the event's commitment as soon as it has fetched the URL.
+- `compiler` names the compiler that built the bundle: `name` is `compactc`, `version` is `x.y.z`, and `flags`, when present, is a non-empty array of strings. They repeat the bundle's `package.json` (`compact.compiler`, `compact.flags`).
+- `index.json` never lists itself, so the commitment covers neither `hash` nor `compiler`. A verifier checks both and trusts neither (see Verification).
 - A path is relative and `/`-separated. Each segment is printable ASCII (0x21 to 0x7e), and is not empty, `.`, `..` or `node_modules`. A path has no backslash, is never `index.json` itself, and appears once.
 - No path is both a file and the directory of another path.
 - `sha256` is 64 lowercase hex digits and `size` a non-negative integer. The size only bounds a download; it is not part of the commitment.
@@ -67,7 +72,7 @@ A verifier key depends only on circuit logic, including the order of its stateme
 
 ## Verification
 
-Level 1: the commitment recomputed from `index.json` equals the published one, and each listed file matches its sha256 and size. Level 2: every shipped key equals the key the contract state stores under that entry point, and every circuit the bundle publishes that has an entry point on chain ships its key. Level 3: recompiling the listed interface source with the installed compiler, without `COMPACT_PATH` and reading only files inside the bundle that the index lists (checked from the compiler's `--trace-search` output; when a listed source imports a file, a missing or unrecognised trace fails Level 3), reproduces exactly the shipped keys, `index.js` and `contract-info.json`. The compiler version in `package.json` is advisory: a different installed version is reported as the likely cause of a mismatch. The README's [How to verify](../README.md#how-to-verify) gives the steps.
+Level 1, in this order: `hash` in `index.json` equals the event's commitment, compared as soon as `index.json` is fetched, so that an index the contract did not commit to stops the check before any other download or any hashing; the commitment recomputed from the entries equals both; each listed file matches its sha256 and size; and `compiler` matches the listed `package.json` (version and flags). Level 2: every shipped key equals the key the contract state stores under that entry point, and every circuit the bundle publishes that has an entry point on chain ships its key. Level 3: recompiling the listed interface source with the installed compiler, without `COMPACT_PATH` and reading only files inside the bundle that the index lists (checked from the compiler's `--trace-search` output; when a listed source imports a file, a missing or unrecognised trace fails Level 3), reproduces exactly the shipped keys, `index.js` and `contract-info.json`. The compiler version in `package.json`, which Level 1 checked `index.json`'s `compiler` against, is advisory: a different installed version is reported as the likely cause of a mismatch. The README's [How to verify](../README.md#how-to-verify) gives the steps.
 
 ## Execution
 

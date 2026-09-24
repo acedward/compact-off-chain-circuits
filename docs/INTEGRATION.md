@@ -122,8 +122,9 @@ compact compile MyContract.compact            out/full
 compact compile MyContract.Interface.compact  out/interface
 ```
 
-Use the toolchain versions your deployment used. The bundle records them; Level 3
-recompiles with the verifier's installed compiler and warns when its version differs.
+Use the toolchain versions your deployment used. The bundle records them, and its
+`index.json` names the compiler; Level 3 recompiles with the verifier's installed
+compiler and warns when its version differs.
 
 ## Step 4 — pre-publish check and payload
 
@@ -147,12 +148,17 @@ and prints:
 
 * the final URL of `index.json` and an example of where a listed file will be
   fetched from (paths resolve relative to that URL),
-* the 32-byte commitment (hex) to the files `index.json` lists,
+* the 32-byte commitment (hex) to the files `index.json` lists, which
+  `index.json` also carries as `hash`,
 * the 256-byte event payload (hex) — `commitment ++ utf8(url)` zero padded,
 * the call to make: `publishBundle(<payload>)`.
 
 `index.json` lists every other file of the bundle with its `path`, `sha256` and
-`size`. The commitment is an elliptic-curve multiset hash on JubJub: each entry
+`size`. It also carries `hash`, the commitment in hex, and `compiler`, the
+compactc version (and flags, if any) from the bundle's `package.json`. Since
+`index.json` is not a listed file, the commitment does not cover those two
+fields, and the verifier checks both rather than trusting them. The commitment
+is an elliptic-curve multiset hash on JubJub: each entry
 is mapped to a curve point with Zcash's Sapling GroupHash of
 `sha256(path) ++ sha256(file)` (personalization `COC_B_v1`) and the points are
 added, so it does not depend on the order of the entries. Paths must be relative,
@@ -187,12 +193,14 @@ node src/verify.mjs \
   --circuit tokenURI --args 1
 ```
 
-The verifier reads the contract's latest public-interface event, fetches the
-`index.json` at its URL (or at `--bundle-url <url>`), checks it against the
-commitment, then fetches
-each listed file into a private temporary directory and checks its sha256 and
-size before anything else runs. Each file is capped at its declared size and the
-whole bundle at 64 MiB.
+The verifier reads the contract's latest public-interface event and fetches the
+`index.json` at its URL (or at `--bundle-url <url>`). It compares the index's
+`hash` with the event's commitment first, and stops there if they differ, before
+fetching or hashing anything else. It then recomputes the commitment from the
+index's entries, fetches each listed file into a private temporary directory and
+checks its sha256 and size, and checks the index's `compiler` against the
+bundle's `package.json`, all before anything else runs. Each file is capped at
+its declared size and the whole bundle at 64 MiB.
 
 Consumers must run a verifier they obtained independently of your bundle, such
 as this repository's `src/verify.mjs`; the bundle carries no copy of it, because
@@ -220,9 +228,10 @@ node src/verify.mjs --bundle bundle/ \
 
 What they get:
 
-* **Level 1** — `index.json` produces the commitment the contract emitted, and
-  every file it lists matches its entry. The bundle is the deployer's
-  commitment.
+* **Level 1** — `index.json`'s `hash` is the commitment the contract emitted,
+  its entries produce that commitment, every file it lists matches its entry,
+  and its `compiler` matches the bundle's `package.json`. The bundle is the
+  deployer's commitment.
 * **Level 2** — every verifier key in the bundle equals the key stored on chain
   for that entry point, and every published circuit that has an entry point on
   chain ships its key. The shipped keys are the deployed keys, so a key that

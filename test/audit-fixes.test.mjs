@@ -314,7 +314,7 @@ describe('F4: the live bundle step skips a bundle already recorded', () => {
     return src.slice(start, next < 0 ? undefined : next);
   };
   for (const [fn, guard] of [
-    ['stepBundle', /if \(record\.bundle\)[^\n]*return;/],
+    ['stepBundle', /if \(rec\.bundle\)[^\n]*return;/],
   ]) {
     it(`${fn} returns before rebuilding when the record exists`, () => {
       const b = body(fn);

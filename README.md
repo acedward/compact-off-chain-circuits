@@ -6,7 +6,7 @@ A contract commits to a small bundle: a partial Compact source containing only t
 
 The examples apply the pattern to OpenZeppelin's FungibleToken, NonFungibleToken and MultiToken, used unmodified, to show it is compatible with that well-known implementation and makes metadata such as `name`, `symbol`, `decimals`, `tokenURI` and `uri` readable. A second, private interface for the ERC-20 publishes only its reads: its ledger fields are named `hidden1` to `hidden7`, and no other circuit's code is published. Targets Midnight 2.x (Ledger v9).
 
-The ERC-20 example is deployed on Midnight Stagenet, and its bundle is published at https://compact-off-chain-circuits.pages.dev/erc20/index.json, a real `index.json` to look at. [Live on Stagenet](#live-on-stagenet) has the contract and its commitment.
+The private ERC-20 interface is live on Midnight Stagenet. Its bundle is published at https://compact-off-chain-circuits.pages.dev/public-interface/erc20-private/index.json, a real `index.json` to look at. [Live on Stagenet](#live-on-stagenet) has the contract, its commitment and the command to verify it.
 
 ## How to use
 
@@ -259,15 +259,15 @@ live/stagenet/                                the Stagenet deployments, their sc
 
 ## Live on Stagenet
 
-The ERC-20 example was deployed on Midnight Stagenet and its interface bundle published before the event got its current name: the contract emitted the earlier name, `bundle/v1`, which the current verifier does not read. A redeployment with the current event is pending. The bundle itself is a real published bundle to look at, and the verifier at commit `90ad944` still checks it against the contract.
+A fresh copy of the ERC-20 example is deployed on Midnight Stagenet. Its interface is the private bundle: the six reads, with the ledger declared as `hidden1` to `hidden7`. Anyone can check it with the verifier in this repository.
 
 | | |
 |---|---|
-| Contract address | `294c2b6a9e405842294f9f273271047aa235654aaeb8dc4d6f44f5cd707cf913` |
-| Bundle URL | https://compact-off-chain-circuits.pages.dev/erc20/index.json |
-| Commitment | `cebd25ff611b7b3416a3bf3bb66a7ab64396806198c0f06d51b9114e15335eb1` |
-| `publishBundle` transaction | `7bdbf4b525c497c7e082557e6b3616def8439384a51ef6e9b34c478a36dbc63e`, block 582728 |
-| Deploy transaction | `708e845bbb787014a73ad8a5e5c7c5ab7a3638f40feba3b140ab299356a976e0`, block 582583 |
+| Contract address | `5d3233163cd730afb8a31b3e61e77fbd5949fa05d35920bd2b5cea32febaa0f6` |
+| Bundle URL | https://compact-off-chain-circuits.pages.dev/public-interface/erc20-private/index.json |
+| Commitment | `4814bf93c6c0a6c81c7839f9be72c80365c2a4179d58171e7acd40906be30891` |
+| `publishBundle` transaction | `79fa53ab3601a373b778d3c0f6d457784457c5540276b254c85d55a7bc55b3de`, block 608267 |
+| Deploy transaction | `8e4fed536d0669954f3c9e656a004a743a2dbebab08b7fbb81bec3334be05878`, block 608212 |
 | Indexer | https://indexer.stagenet.shielded.tools/api/v4/graphql |
 
 The files listed in `index.json`, with paths relative to the bundle URL:
@@ -285,14 +285,22 @@ out/keys/decimals.verifier
 out/keys/name.verifier
 out/keys/symbol.verifier
 out/keys/totalSupply.verifier
-src/OffChainInterface.compact
-src/integrations/openzeppelin/FungibleTokenReadable.Interface.compact
-src/integrations/openzeppelin/FungibleTokenReadable.compact
-src/vendor/openzeppelin/token/FungibleToken.compact
-src/vendor/openzeppelin/utils/Utils.compact
+src/Interface.compact
 ```
 
-The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagenet/contracts/ERC20Live.compact). It was deployed with `publishBundle` and the six reads only, because Stagenet's limit of 50,000 bytes written per block rejects all 19 circuits of the full example in one transaction; the maintenance authority then added `transfer`, `approve` and `transferFrom`. Every transaction is recorded in [live/stagenet/deployment.json](live/stagenet/deployment.json), together with the other Stagenet deployments, which tested the alternatives in [docs/PLACEMENTS.md](docs/PLACEMENTS.md), including a `publishBundle` proven with MinoCrab.
+The only source is `src/Interface.compact`: no other circuit's code and no deployed field name is published.
+
+Check it from a clone, after `npm ci`:
+
+```sh
+node src/verify.mjs --indexer https://indexer.stagenet.shielded.tools/api/v4/graphql \
+  --address 5d3233163cd730afb8a31b3e61e77fbd5949fa05d35920bd2b5cea32febaa0f6 \
+  --circuit name --level 3
+```
+
+It prints two `L1 OK`, six `L2 OK`, eight `L3 OK` and `name() = "Off-Chain Reads Private Token"`. The other reads return `symbol() = "OCRP"`, `decimals() = 18` and `totalSupply() = 1000000000000000000000000`. The whole supply was minted to a keyless demo holder, so `--circuit balanceOf --args key:0x13f03a2916c2bbb04b050ffb5061187386c73af8ba57bf70c7ddf1fa8c2a005a` returns the same amount. Level 3 needs the `compact` toolchain (the bundle was built with 0.34.0); without it, drop `--level 3`.
+
+The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagenet/contracts/ERC20Live.compact), which imports the unmodified OpenZeppelin module. It was deployed with `publishBundle` and the six reads, because Stagenet's limit of 50,000 bytes written per block rejects all 19 circuits in one transaction. The maintenance authority then added `transfer`, `approve` and `transferFrom` (blocks 608232 to 608238): their keys are on chain, but their code is in no published file. Every transaction is recorded in [live/stagenet/deployment.json](live/stagenet/deployment.json) under `privateInterface`. It sits next to the earlier deployments: the first ERC-20 contract, which emitted the event's earlier name `bundle/v1`, and the contracts that tested the alternatives in [docs/PLACEMENTS.md](docs/PLACEMENTS.md).
 
 ## Limitations
 
@@ -300,7 +308,7 @@ The deployed contract is [live/stagenet/contracts/ERC20Live.compact](live/stagen
 - Each bundle version costs one transaction with one proof after deployment, because constructors cannot emit. The prover key for `publishBundle` is about 67 MB, larger than any token circuit's, because the 256-byte payload is decomposed byte by byte.
 - Circuits with witnesses are refused, and so are circuits with no verifier key on chain, such as pure ones. Reads of `boundedMerkleTree` slots are untested.
 - The verifier sets no timeout and no limit on the number of files. Read What to expect before running it unattended.
-- Verified live on Stagenet with the event's earlier name; a redeployment with the current name is pending (see [Live on Stagenet](#live-on-stagenet)). The test suite builds states locally, with verifier keys installed the way a deployment installs them.
+- Verified live on Stagenet with the private interface (see [Live on Stagenet](#live-on-stagenet)). The test suite builds states locally, with verifier keys installed the way a deployment installs them.
 
 ## Tested with
 

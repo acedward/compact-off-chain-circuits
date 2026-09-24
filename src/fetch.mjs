@@ -167,7 +167,9 @@ function readLocal(dir, path, cap) {
 
 /**
  * Obtain and validate index.json, from `{ url }` or `{ dir }`. Does not check
- * the commitment; the caller compares it before fetching any listed file.
+ * its hash, the commitment or its compiler; the caller compares the hash with
+ * the event's commitment first, before fetching any listed file (src/verify.mjs
+ * levelOne).
  */
 export async function readIndex({ url, dir }, { budget = new Budget() } = {}) {
   let raw, source;

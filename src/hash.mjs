@@ -20,6 +20,12 @@
 // use the Compact runtime's `hashToCurve` (Poseidon based, and Poseidon may
 // change on a hard fork); `@noble/curves` implements the Zcash construction,
 // which is fixed.
+//
+// index.json also carries `hash`, the commitment itself in hex, so a reader can
+// compare it with the chain's at once, and `compiler`, the compiler that built
+// the bundle. index.json is never listed, so neither field is covered by the
+// commitment: the verifier checks both and trusts neither (src/verify.mjs
+// levelOne).
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -31,10 +37,13 @@ export const INDEX_FILE = 'index.json';
 export const INDEX_FORMAT = Object.freeze({ bundle: 'v1', commitment: 'ecmh-jubjub-grouphash' });
 /** BLAKE2s personalization of the entry hash: exactly 8 ASCII bytes. */
 export const PERSONALIZATION = 'COC_B_v1';
+/** The only compiler an index names: the one whose output Level 3 reproduces. */
+export const COMPILER_NAME = 'compactc';
 
 const PERS_BYTES = new TextEncoder().encode(PERSONALIZATION);
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest();
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 
 // ---------------------------------------------------------------------------
 // Files
@@ -121,9 +130,15 @@ const onlyKeys = (obj, allowed, where) => {
   if (extra.length) throw new IndexError(`${where} has unknown field(s) ${extra.map(show).join(', ')}`);
 };
 
+const isObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+
 /**
  * Check an index against the format and the path rules. Returns it unchanged,
  * or throws IndexError naming the first problem.
+ *
+ * This checks the form of `hash` and `compiler` only. Whether `hash` is the
+ * commitment of the entries and the chain's, and whether `compiler` matches the
+ * bundle's package.json, the verifier checks (src/verify.mjs levelOne).
  *
  * The format does not limit the number of entries. Each one costs about 0.35 ms
  * of group hashing when the commitment is computed, so 1,000 entries take about
@@ -131,11 +146,15 @@ const onlyKeys = (obj, allowed, where) => {
  * high estimates a caller can base its own limits on.
  */
 export function validateIndex(index) {
-  if (!index || typeof index !== 'object' || Array.isArray(index)) throw new IndexError('index.json is not a JSON object');
-  onlyKeys(index, ['bundle', 'commitment', 'files'], 'index.json');
+  if (!isObject(index)) throw new IndexError('index.json is not a JSON object');
+  onlyKeys(index, ['bundle', 'commitment', 'hash', 'compiler', 'files'], 'index.json');
   for (const [k, want] of Object.entries(INDEX_FORMAT)) {
     if (index[k] !== want) throw new IndexError(`index.json "${k}" is ${show(index[k])}, expected "${want}"`);
   }
+  if (typeof index.hash !== 'string' || !SHA256_HEX.test(index.hash)) {
+    throw new IndexError(`index.json "hash" is ${index.hash === undefined ? 'missing' : show(index.hash)}, expected 64 lowercase hex digits (the commitment)`);
+  }
+  validateCompiler(index.compiler);
   if (!Array.isArray(index.files)) throw new IndexError('index.json "files" is not an array');
 
   const seen = new Set();
@@ -161,17 +180,63 @@ export function validateIndex(index) {
   return index;
 }
 
+/** `compiler`: exactly `name` ("compactc"), `version` (x.y.z) and, only when the bundle records flags, `flags`. */
+function validateCompiler(c) {
+  if (!isObject(c)) throw new IndexError(`index.json "compiler" is not an object { name, version[, flags] } (it is ${c === undefined ? 'missing' : show(c)})`);
+  onlyKeys(c, ['name', 'version', 'flags'], 'index.json "compiler"');
+  if (c.name !== COMPILER_NAME) throw new IndexError(`index.json "compiler".name is ${show(c.name)}, expected "${COMPILER_NAME}"`);
+  if (typeof c.version !== 'string' || !VERSION.test(c.version)) {
+    throw new IndexError(`index.json "compiler".version is ${show(c.version)}, expected a version x.y.z`);
+  }
+  if (c.flags !== undefined && (!Array.isArray(c.flags) || c.flags.length === 0 || c.flags.some((f) => typeof f !== 'string'))) {
+    throw new IndexError(`index.json "compiler".flags is ${show(c.flags)}, expected a non-empty array of strings (present only when the bundle records flags)`);
+  }
+}
+
+/**
+ * The `compiler` that a bundle's parsed package.json implies: compactc, the
+ * version `compact.compiler` pins, and `compact.flags` when it records any. The
+ * writer fills index.json from it and Level 1 checks index.json against it, so
+ * the two can only agree. Throws IndexError when package.json does not say.
+ */
+export function compilerOf(pkg) {
+  const c = pkg?.compact;
+  if (!isObject(c)) throw new IndexError('package.json has no "compact" object');
+  if (typeof c.compiler !== 'string' || c.compiler === '') throw new IndexError(`package.json compact.compiler is ${c.compiler === undefined ? 'missing' : show(c.compiler)}, expected the compiler version`);
+  if (c.flags !== undefined && (!Array.isArray(c.flags) || c.flags.some((f) => typeof f !== 'string'))) {
+    throw new IndexError(`package.json compact.flags is ${show(c.flags)}, expected an array of strings`);
+  }
+  return { name: COMPILER_NAME, version: c.compiler, ...(c.flags?.length ? { flags: [...c.flags] } : {}) };
+}
+
+/** `compactc 0.34.0`, then any flags: how reports name a compiler. */
+export const compilerText = (c) => [c.name, c.version, ...(c.flags ?? [])].join(' ');
+
+/** Whether two `compiler` values name the same compiler, version and flags (no flags and none recorded are the same). */
+export const sameCompiler = (a, b) => JSON.stringify([a.name, a.version, a.flags ?? []]) === JSON.stringify([b.name, b.version, b.flags ?? []]);
+
 /** `[path, sha256hex]` for every entry of a validated index. */
 export const indexEntries = (index) => index.files.map((f) => [f.path, f.sha256]);
 
 /** The 32-byte commitment a validated index produces. */
 export const indexCommitment = (index) => encodePoint(commitment(indexEntries(index)));
 
+/** The parsed `dir/package.json`, for the writer; IndexError when it cannot be read. */
+function readPackage(dir) {
+  let text;
+  try { text = readFileSync(join(dir, 'package.json'), 'utf8'); }
+  catch (e) { throw new IndexError(`cannot write index.json: ${join(dir, 'package.json')} cannot be read (${e.code ?? e.message}); it names the compiler`); }
+  try { return JSON.parse(text); } catch (e) { throw new IndexError(`package.json is not JSON (${e.message})`); }
+}
+
 /**
  * The index of the bundle in `dir`: every file except `index.json` (and
  * `node_modules`, which is never part of a bundle), sorted by path so it reads
- * well; the commitment does not depend on the order. Throws if a file's path
- * breaks the path rules, since such a bundle cannot be published.
+ * well; the commitment does not depend on the order. `hash` is the commitment
+ * of those entries, and `compiler` comes from the bundle's own package.json.
+ * Fields in the order bundle, commitment, hash, compiler, files. Throws if a
+ * file's path breaks the path rules, or if package.json does not name the
+ * compiler, since such a bundle cannot be published.
  */
 export function buildIndex(dir) {
   const files = walk(dir).filter((p) => p !== INDEX_FILE).map((p) => {
@@ -180,7 +245,8 @@ export function buildIndex(dir) {
     const abs = join(dir, ...p.split('/'));
     return { path: p, sha256: fileHash(abs), size: statSync(abs).size };
   });
-  return validateIndex({ ...INDEX_FORMAT, files });
+  const hash = encodePoint(commitment(files.map((f) => [f.path, f.sha256]))).toString('hex');
+  return validateIndex({ ...INDEX_FORMAT, hash, compiler: compilerOf(readPackage(dir)), files });
 }
 
 /** Build the index of `dir` and write it to `dir/index.json`. */
@@ -188,7 +254,7 @@ export function writeIndex(dir) {
   const index = buildIndex(dir);
   const text = JSON.stringify(index, null, 2) + '\n';
   writeFileSync(join(dir, INDEX_FILE), text);
-  return { index, commitment: indexCommitment(index), bytes: Buffer.byteLength(text) };
+  return { index, commitment: Buffer.from(index.hash, 'hex'), bytes: Buffer.byteLength(text) };
 }
 
 /** Read and validate `dir/index.json`. */

@@ -145,11 +145,15 @@ describe('index.json', () => {
   let s, dir;
   const files = [
     ['README.md', 'hello\n'],
+    ['package.json', '{ "compact": { "compiler": "0.34.0", "language": "0.26.0", "runtime": "0.19.0", "interface": "src/Thing.compact" } }\n'],
     ['out/keys/a.verifier', 'AAAA'],
     ['out/contract/index.js', 'export const x = 1;\n'],
     ['src/Thing.compact', 'pragma language_version >= 0.23.0;\n'],
   ];
-  const good = () => ({ ...INDEX_FORMAT, files: files.map(([path, c]) => ({ path, sha256: sha(c), size: Buffer.byteLength(c) })) });
+  const entries = () => files.map(([path, c]) => ({ path, sha256: sha(c), size: Buffer.byteLength(c) }));
+  /** The commitment of `files`, as index.json's hash carries it. */
+  const HASH = enc(commitment(files.map(([p, c]) => [p, sha(c)])));
+  const good = () => ({ ...INDEX_FORMAT, hash: HASH, compiler: { name: 'compactc', version: '0.34.0' }, files: entries() });
 
   beforeAll(() => {
     s = scratch('hash');
@@ -164,7 +168,11 @@ describe('index.json', () => {
   it('lists every file except itself, sorted, with sha256 and size', () => {
     const { index, commitment: c } = writeIndex(dir);
     expect(walk(dir)).toContain('index.json');
-    expect(index).toEqual({ bundle: 'v1', commitment: 'ecmh-jubjub-grouphash', files: [...good().files].sort((a, b) => (a.path < b.path ? -1 : 1)) });
+    expect(index).toEqual({
+      bundle: 'v1', commitment: 'ecmh-jubjub-grouphash', hash: HASH, compiler: { name: 'compactc', version: '0.34.0' },
+      files: [...good().files].sort((a, b) => (a.path < b.path ? -1 : 1)),
+    });
+    expect(index.hash).toBe(c.toString('hex'));
     expect(readIndexFile(dir)).toEqual(index);
     expect(c.equals(indexCommitment(index))).toBe(true);
     expect(c.equals(encodePoint(commitment(files.map(([p, content]) => [p, sha(content)]))))).toBe(true);
@@ -173,12 +181,13 @@ describe('index.json', () => {
   });
 
   it('has no runtime field: the scheme does not depend on the Compact runtime', () => {
-    expect(Object.keys(JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8'))).sort()).toEqual(['bundle', 'commitment', 'files']);
+    expect(Object.keys(JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')))).toEqual(['bundle', 'commitment', 'hash', 'compiler', 'files']);
   });
 
   it('the commitment is the same whatever order the index lists files in', () => {
     const a = good();
     const b = { ...a, files: [...a.files].reverse() };
+    expect(indexCommitment(validateIndex(a)).toString('hex')).toBe(HASH);
     expect(indexCommitment(validateIndex(a)).equals(indexCommitment(validateIndex(b)))).toBe(true);
     expect(indexEntries(b)[0]).toEqual([b.files[0].path, b.files[0].sha256]);
   });
@@ -194,6 +203,7 @@ describe('index.json', () => {
   it('refuses to build an index for a file whose path the rules forbid', () => {
     const odd = join(s.dir, 'odd');
     mkdirSync(odd, { recursive: true });
+    writeFileSync(join(odd, 'package.json'), files[1][1]);
     writeFileSync(join(odd, 'with space.txt'), 'x');
     expect(() => buildIndex(odd)).toThrow(IndexError);
     expect(() => buildIndex(odd)).toThrow(/printable ASCII/);
@@ -205,6 +215,25 @@ describe('index.json', () => {
     ['wrong bundle tag', mutate((i) => { i.bundle = 'v2'; }), /"bundle"/],
     ['wrong commitment tag', mutate((i) => { i.commitment = 'ecmh-jubjub'; }), /"commitment"/],
     ['a runtime field (not part of this format)', mutate((i) => { i.runtime = '0.19.0'; }), /unknown field.*runtime/],
+    ['no hash (an index written before the hash was required)', mutate((i) => { delete i.hash; }), /"hash".*64 lowercase hex/],
+    ['an uppercase hash', mutate((i) => { i.hash = i.hash.toUpperCase(); }), /"hash".*64 lowercase hex/],
+    ['a short hash', mutate((i) => { i.hash = i.hash.slice(2); }), /"hash".*64 lowercase hex/],
+    ['a 0x-prefixed hash', mutate((i) => { i.hash = `0x${i.hash.slice(2)}`; }), /"hash".*64 lowercase hex/],
+    ['a hash given as bytes', mutate((i) => { i.hash = [...Buffer.from(i.hash, 'hex')]; }), /"hash".*64 lowercase hex/],
+    ['no compiler', mutate((i) => { delete i.compiler; }), /"compiler" is not an object/],
+    ['a compiler given as a string', mutate((i) => { i.compiler = 'compactc 0.34.0'; }), /"compiler" is not an object/],
+    ['a compiler given as an array', mutate((i) => { i.compiler = ['compactc', '0.34.0']; }), /"compiler" is not an object/],
+    ['another compiler name', mutate((i) => { i.compiler.name = 'compact'; }), /"compiler"\.name .*expected "compactc"/],
+    ['a compiler without a name', mutate((i) => { delete i.compiler.name; }), /"compiler"\.name .*expected "compactc"/],
+    ['a compiler without a version', mutate((i) => { delete i.compiler.version; }), /"compiler"\.version .*x\.y\.z/],
+    ['a two-part version', mutate((i) => { i.compiler.version = '0.34'; }), /"compiler"\.version .*x\.y\.z/],
+    ['a v-prefixed version', mutate((i) => { i.compiler.version = 'v0.34.0'; }), /"compiler"\.version .*x\.y\.z/],
+    ['a version with a suffix', mutate((i) => { i.compiler.version = '0.34.0 (compact 0.5.1)'; }), /"compiler"\.version .*x\.y\.z/],
+    ['a version given as a number', mutate((i) => { i.compiler.version = 0.34; }), /"compiler"\.version .*x\.y\.z/],
+    ['an unknown compiler field', mutate((i) => { i.compiler.language = '0.26.0'; }), /"compiler" has unknown field.*language/],
+    ['compiler flags that are not an array', mutate((i) => { i.compiler.flags = '--feature-zkir-v3'; }), /"compiler"\.flags .*non-empty array of strings/],
+    ['an empty flags array (present only when the bundle records flags)', mutate((i) => { i.compiler.flags = []; }), /"compiler"\.flags .*non-empty array of strings/],
+    ['a flag that is not a string', mutate((i) => { i.compiler.flags = ['--feature-zkir-v3', 3]; }), /"compiler"\.flags .*non-empty array of strings/],
     ['files not an array', mutate((i) => { i.files = {}; }), /not an array/],
     ['an entry that is not an object', mutate((i) => { i.files.push('README.md'); }), /not an object/],
     ['an unknown entry field', mutate((i) => { i.files[0].mode = 0o644; }), /unknown field.*mode/],
@@ -227,8 +256,13 @@ describe('index.json', () => {
   }
 
   it('validation accepts an empty file list (its commitment is the identity)', () => {
-    const i = validateIndex({ ...INDEX_FORMAT, files: [] });
+    const i = validateIndex({ ...INDEX_FORMAT, hash: '01' + '00'.repeat(31), compiler: { name: 'compactc', version: '0.34.0' }, files: [] });
     expect(indexCommitment(i).toString('hex')).toBe('01' + '00'.repeat(31));
+  });
+
+  it('validation accepts compiler flags, and does not compare the hash with the entries (the verifier does)', () => {
+    expect(() => validateIndex(mutate((i) => { i.compiler.flags = ['--feature-zkir-v3']; }))).not.toThrow();
+    expect(() => validateIndex(mutate((i) => { i.hash = 'ab'.repeat(32); }))).not.toThrow();
   });
 });
 

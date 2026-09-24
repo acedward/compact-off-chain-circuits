@@ -68,6 +68,13 @@ describe.skipIf(!isBuilt())(`Level 1 over HTTP (${isBuilt() ? 'built' : BUILD_HI
       j.files.find((f) => f.path === 'out/contract/index.js').sha256 = 'ab'.repeat(32);
       body = Buffer.from(JSON.stringify(j, null, 2));
     }
+    if (mode === 'other-version' && rel === '/nft/index.json') {
+      // Another version of the bundle, consistent in itself: its entries give its hash.
+      const j = JSON.parse(body);
+      j.files.find((f) => f.path === 'README.md').sha256 = 'ef'.repeat(32);
+      j.hash = indexCommitment(j).toString('hex');
+      body = Buffer.from(JSON.stringify(j, null, 2));
+    }
     if (mode === '404-key' && rel === '/nft/out/keys/tokenURI.verifier') { res.writeHead(404).end(); return; }
     if (mode === 'oversize-announced' && rel === '/nft/out/contract/index.js') {
       body = Buffer.concat([body, Buffer.alloc(1024, 0x20)]);            // honest Content-Length, too big
@@ -181,13 +188,26 @@ describe.skipIf(!isBuilt())(`Level 1 over HTTP (${isBuilt() ? 'built' : BUILD_HI
     expect(r.execution).toBeUndefined();
   });
 
-  it('host alters index.json: Level 1 fails on the commitment before fetching any listed file', async () => {
+  it('host alters an entry of index.json but not its hash: Level 1 fails on the entries before fetching any listed file', async () => {
     mode = 'alter-index';
     const r = await read();
     expect(r.checks.level1.ok).toBe(false);
+    expect(r.checks.level1.hashOk).toBe(true);
     expect(r.checks.level1.indexOk).toBe(false);
-    expect(r.checks.level1.reason).toBe('index does not match the commitment');
+    expect(r.checks.level1.reason).toMatch(/^index\.json's entries give [0-9a-f]{64}, not its hash \(the event's commitment\): this is not the index the contract committed to$/);
     expect(log).toEqual(['/nft/index.json']);
+    expect(r.execution).toBeUndefined();
+  });
+
+  it('host serves another version of index.json: its hash differs from the event\'s, so Level 1 stops after one request, hashing nothing', async () => {
+    mode = 'other-version';
+    const r = await read();
+    expect(r.checks.level1.ok).toBe(false);
+    expect(r.checks.level1.hashOk).toBe(false);
+    expect(r.checks.level1.computed).toBeUndefined();
+    expect(r.checks.level1.reason).toMatch(/^index\.json's hash [0-9a-f]{64} is not the event's commitment: this is not the index the contract committed to$/);
+    expect(log).toEqual(['/nft/index.json']);
+    expect(r.level).toBe(0);
     expect(r.execution).toBeUndefined();
   });
 
@@ -216,14 +236,14 @@ describe.skipIf(!isBuilt())(`Level 1 over HTTP (${isBuilt() ? 'built' : BUILD_HI
     expect(r.checks.level1.reason).toMatch(/announces \d+ bytes, over the cap/);
   });
 
-  /** A deployer who commits to a hostile index: publish it and commit to it. */
+  /** A deployer who commits to a hostile index: publish it, with its hash, and commit to it. */
   const hostile = (name, files) => {
     const dir = join(site, name);
     mkdirSync(dir, { recursive: true });
-    const index = { ...INDEX_FORMAT, files };
-    writeFileSync(join(dir, 'index.json'), JSON.stringify(index));
     // Bypass validation to compute the commitment the deployer would emit.
-    const commitment = (() => { try { return indexCommitment(validateIndex(index)); } catch { return indexCommitment(index); } })();
+    const commitment = (() => { try { return indexCommitment(validateIndex({ ...INDEX_FORMAT, files })); } catch { return indexCommitment({ files }); } })();
+    const index = { ...INDEX_FORMAT, hash: commitment.toString('hex'), compiler: bundle.index.compiler, files };
+    writeFileSync(join(dir, 'index.json'), JSON.stringify(index));
     return assemblePayload(commitment, `${base}/${name}/index.json`);
   };
 
@@ -275,8 +295,12 @@ describe.skipIf(!isBuilt())(`Level 1 over HTTP (${isBuilt() ? 'built' : BUILD_HI
       '--event-payload', sim.eventPayload.toString('hex'), '--state', sim.state.toString('hex'),
       '--circuit', 'tokenURI', '--args', '1',
     ]);
-    expect(stdout).toMatch(/^L1 OK +index\.json matches the commitment/m);
-    expect(stdout).toMatch(/^L1 OK +16 listed files, each matches its sha256 and size \(\d+ bytes, 17 HTTP requests\)/m);
+    expect(stdout.match(/^L1 .*$/gm)).toEqual([
+      'L1 OK   index.json hash is the event\'s commitment',
+      expect.stringMatching(/^L1 OK {3}index\.json entries give the same commitment \(16 files listed, \d+ bytes\)$/),
+      expect.stringMatching(/^L1 OK {3}16 listed files, each matches its sha256 and size \(\d+ bytes, 17 HTTP requests\)$/),
+      'L1 OK   compiler compactc 0.34.0 (index.json) matches the bundle\'s package.json',
+    ]);
     expect(stdout.match(/^L2 OK/gm)).toHaveLength(5);
     expect(stdout).toContain(`tokenURI(1) = ${GENUINE}`);
     expect(stdout).toMatch(/verified up to level 2/);
@@ -293,6 +317,21 @@ describe.skipIf(!isBuilt())(`Level 1 over HTTP (${isBuilt() ? 'built' : BUILD_HI
     expect(err.stdout).toMatch(/^L1 FAIL out\/contract\/index\.js: sha256/m);
     expect(err.stdout).toMatch(/verified up to level 0/);
     expect(err.stdout).not.toContain('tokenURI(1) =');
+  });
+
+  it('the CLI exits 1 after one request when the served index.json is not the one committed to', async () => {
+    mode = 'other-version';
+    const err = await run(process.execPath, [
+      join(REPO, 'src', 'verify.mjs'), '--bundle-url', `${base}/nft/index.json`,
+      '--event-payload', sim.eventPayload.toString('hex'), '--state', sim.state.toString('hex'),
+      '--circuit', 'tokenURI', '--args', '1',
+    ]).then(() => null, (e) => e);
+    expect(err?.code).toBe(1);
+    expect(err.stdout).toMatch(/^L1 FAIL index\.json hash [0-9a-f]{64} is not the event's commitment$/m);
+    expect(err.stdout).toMatch(/^ {5}this is not the index the contract committed to; nothing else was fetched, hashed or executed\.$/m);
+    expect(err.stdout).not.toMatch(/^L1 OK/m);
+    expect(err.stdout).toMatch(/verified up to level 0/);
+    expect(log).toEqual(['/nft/index.json']);
   });
 });
 

@@ -35,6 +35,16 @@ export const fullOut = (example) => join(REPO, 'build', example, 'full');
 export const isBuilt = () => EXAMPLES.every((e) => existsSync(join(interfaceOut(e), 'keys')) && existsSync(join(fullOut(e), 'keys')));
 export const BUILD_HINT = 'build/ is missing or incomplete — run scripts/build.sh first (the example contracts take several minutes)';
 
+/**
+ * The second, private interface of the fungible example: it imports no module and
+ * declares the deployed ledger itself under hidden names. It has no contract of its
+ * own; `scripts/check-keys.mjs` compares its keys with `build/fungible/full`.
+ */
+export const PRIVATE = 'fungible-private';
+export const privateSrc = join(REPO, 'compact', 'examples', PRIVATE, 'Interface.compact');
+export const isPrivateBuilt = () => isBuilt() && existsSync(join(interfaceOut(PRIVATE), 'keys'));
+export const PRIVATE_BUILD_HINT = `build/${PRIVATE} is missing — run scripts/build.sh`;
+
 /** Is the pinned compiler available? Level 3 and the compile-based tests need it. */
 export function hasCompact() {
   try { execFileSync(COMPACT, ['compile', '--version'], { stdio: 'ignore' }); return true; }

@@ -1,8 +1,8 @@
 # Live Stagenet deployment
 
-Scripts that deployed the ERC-20 example to Midnight Stagenet and published its interface bundle. The results are in `deployment.json`. Copies of the published bundles are in `site/`: `site/erc20/`, `site/registry/{erc20,erc20-metadata}/`, `site/registry-first/{erc20,erc20-metadata}/` and `site/minocrab/erc20/`. They are published, so do not rebuild them: a rebuild with another version of this repository can change a commitment the chain holds, and a Pages deploy of `site/` must keep serving them. The bundle step skips a bundle already recorded.
+Scripts that deployed the ERC-20 example to Midnight Stagenet and published its interface bundle. The results are in `deployment.json`. Copies of the published bundles are in `site/`: `site/public-interface/erc20-private/` (the current deployment), `site/erc20/`, `site/registry/{erc20,erc20-metadata}/`, `site/registry-first/{erc20,erc20-metadata}/` and `site/minocrab/erc20/`. They are published, so do not rebuild them: a rebuild with another version of this repository can change a commitment the chain holds, and a Pages deploy of `site/` must keep serving them. The bundle step skips a bundle already recorded.
 
-These deployments predate the current event name: their contracts emitted the previous one. The steps that tried the other places a contract could advertise its interface (operations metadata, registry maps, index 15, per-standard events and a MinoCrab-proven event) were removed after commit `90ad944`, together with the contracts only they used. Their records stay in `deployment.json` and their bundles in `site/`, and [../../docs/PLACEMENTS.md](../../docs/PLACEMENTS.md) describes them as alternatives studied, not delivered.
+The current deployment, `privateInterface` in `deployment.json`, is a fresh copy of ERC20Live whose interface is the private bundle (`compact/examples/fungible-private/`). The earlier deployments predate the current event name: their contracts emitted the previous one, and their `index.json` files lack the `hash` and `compiler` fields that the current verifier requires. The steps that tried the other places a contract could advertise its interface (operations metadata, registry maps, index 15, per-standard events and a MinoCrab-proven event) were removed after commit `90ad944`, together with the contracts only they used. Their records stay in `deployment.json` and their bundles in `site/`, and [../../docs/PLACEMENTS.md](../../docs/PLACEMENTS.md) describes them as alternatives studied, not delivered.
 
 ## Steps
 
@@ -17,6 +17,8 @@ node --env-file=../../.env deploy.mjs bundle                # write site/erc20 f
 npx wrangler pages deploy site --project-name compact-off-chain-circuits --branch main
 node --env-file=../../.env deploy.mjs publish               # check the hosted bundle, then call publishBundle
 ```
+
+A second argument picks the deployment. The default is `erc20`, the first one. `private` is the current one: the same steps with `private` added (for example `deploy.mjs contract private`) deploy a fresh copy under `privateInterface` and write its bundle to `site/public-interface/erc20-private/`.
 
 The repository root needs `scripts/build.sh` to have run first, because `deploy.mjs` reads the full example's keys from `build/`. Each step records its result in `deployment.json` and is skipped when already recorded. A proof server on another port is set with `MN_PROOF_SERVER_URL`.
 

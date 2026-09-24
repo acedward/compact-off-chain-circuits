@@ -11,9 +11,12 @@
 // Levels 1 and 2 always run together; `--level` is 2 (the default) or 3, which
 // adds the recompile.
 //
-// Level 1 copies only the files index.json lists, each checked, into a fresh
-// private directory; everything after it runs there. Nothing is submitted, no
-// proof is produced and no proof provider is contacted.
+// Level 1 compares index.json's `hash` with the event's commitment as soon as
+// index.json is in, then recomputes the commitment from its entries, then
+// copies only the files it lists, each checked, into a fresh private directory,
+// and finally checks its `compiler` against the committed package.json.
+// Everything after it runs in that directory. Nothing is submitted, no proof is
+// produced and no proof provider is contacted.
 //
 // No code from the bundle runs during the checks. Level 2 reads the wrapper's
 // `expectedVk` table as text, and Level 3 compares the wrapper byte for byte.
@@ -45,7 +48,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as rt from '@midnight-ntwrk/compact-runtime';
-import { INDEX_FILE, indexCommitment, parsePayload } from './hash.mjs';
+import { INDEX_FILE, compilerOf, compilerText, indexCommitment, parsePayload, sameCompiler } from './hash.mjs';
 import { Budget, BundleError, MAX_BUNDLE_BYTES, materialize, readIndex } from './fetch.mjs';
 import { fetchLatestBundleEvent, fetchState } from './indexer.mjs';
 import { asciiJson, printable } from './escape.mjs';
@@ -82,36 +85,74 @@ const LEVEL_ERROR = 'must be 2 or 3 (Level 1 always runs with Level 2)';
 // Level 1 — the deployer's commitment
 // ---------------------------------------------------------------------------
 /**
- * Obtain index.json from `bundleUrl` or `bundleDir`, validate it, and compare
- * the commitment of its entries with the event's. Only then obtain each listed
- * file, check its size and sha256, and write it into a new private directory.
+ * Why index.json's `compiler` does not match the bundle's package.json, which
+ * Level 1 has just checked into `dir`, or null when it does. `listed` is the
+ * list of paths index.json lists: a package.json it does not list is not part
+ * of the committed bundle.
+ */
+function compilerProblem(compiler, dir, listed) {
+  const unchecked = "so index.json's compiler cannot be checked against it";
+  if (!listed.includes('package.json')) return `package.json is not listed in index.json, ${unchecked}`;
+  const read = readRegular(dir, 'package.json');
+  if (read.error) return `${read.error}, ${unchecked}`;
+  let pinned;
+  try { pinned = compilerOf(JSON.parse(read.bytes.toString('utf8'))); }
+  catch (e) { return `the bundle's package.json does not name the compiler (${e instanceof SyntaxError ? `not JSON: ${e.message}` : e.message}), ${unchecked}`; }
+  if (sameCompiler(compiler, pinned)) return null;
+  return `index.json names compiler ${compilerText(compiler)}, but the bundle's package.json pins ${compilerText(pinned)}`;
+}
+
+/**
+ * Level 1, in this order:
+ *   1. obtain index.json from `bundleUrl` or `bundleDir` and validate it;
+ *   2. compare its `hash` with the event's commitment, a string comparison: on
+ *      a mismatch this is not the index the contract committed to, and nothing
+ *      else is downloaded or hashed;
+ *   3. recompute the commitment from its entries and require it to equal both,
+ *      since `hash` itself is not covered by the commitment;
+ *   4. obtain each listed file, check its size and sha256, and write it into a
+ *      new private directory;
+ *   5. require its `compiler`, which the commitment does not cover either, to
+ *      match the committed package.json.
  *
  * Returns `{ ok, dir, ... }`; `dir` is the private directory (the caller removes
- * it). On failure `ok` is false, `reason` says why and `file` names the file at
- * fault when there is one. Never throws for a failed check.
+ * it). `hashOk`, `indexOk`, `filesOk` and `compilerOk` are set as each step is
+ * reached. On failure `ok` is false, `reason` says why, `file` names the file at
+ * fault when there is one, and no private directory is left behind. Never
+ * throws for a failed check.
  */
 export async function levelOne({ bundleDir, bundleUrl, committed }, { tmpRoot, maxBytes = MAX_BUNDLE_BYTES } = {}) {
   const out = { ok: false, committed: Buffer.from(committed), source: bundleUrl ? { url: bundleUrl } : { dir: resolve(bundleDir) } };
   const budget = new Budget(maxBytes);
+  const fail = (reason, file) => Object.assign(out, { reason, file });
+  let dir;
   try {
     const { index, source, bytes } = await readIndex(bundleUrl ? { url: bundleUrl } : { dir: bundleDir }, { budget });
-    out.index = { source, bytes, files: index.files.length };
+    out.index = { source, bytes, files: index.files.length, hash: index.hash, compiler: index.compiler };
+
+    out.hashOk = index.hash === out.committed.toString('hex');
+    if (!out.hashOk) return fail(`index.json's hash ${index.hash} is not the event's commitment: this is not the index the contract committed to`, INDEX_FILE);
+
     out.computed = indexCommitment(index);
     out.indexOk = out.computed.equals(out.committed);
     if (!out.indexOk) {
-      out.reason = 'index does not match the commitment';
-      out.file = INDEX_FILE;
-      return out;
+      return fail(`index.json's entries give ${out.computed.toString('hex')}, not its hash (the event's commitment): this is not the index the contract committed to`, INDEX_FILE);
     }
+
     const m = await materialize({ index, url: bundleUrl, dir: bundleDir }, { budget, tmpRoot });
-    Object.assign(out, {
-      ok: true, dir: m.dir, files: m.files, bytes: bytes + m.bytes, requests: bundleUrl ? m.requests + 1 : 0,
-      listed: index.files.map((f) => f.path),   // the private copy holds these and no index.json
-    });
+    dir = m.dir;
+    const listed = index.files.map((f) => f.path);   // the private copy holds these and no index.json
+    Object.assign(out, { filesOk: true, files: m.files, bytes: bytes + m.bytes, requests: bundleUrl ? m.requests + 1 : 0 });
+
+    const problem = compilerProblem(index.compiler, m.dir, listed);
+    out.compilerOk = problem === null;
+    if (problem) return fail(problem, INDEX_FILE);
+    Object.assign(out, { ok: true, dir: m.dir, listed });
   } catch (e) {
     if (!(e instanceof BundleError)) throw e;
-    out.reason = e.message;
-    out.file = e.file;
+    fail(e.message, e.file);
+  } finally {
+    if (dir && !out.ok) rmSync(dir, { recursive: true, force: true });
   }
   return out;
 }
@@ -710,17 +751,29 @@ export function printReport(r) {
   const from = { 'event url': ' (from the event)', dir: ' (local copy)' }[r.bundle.from] ?? '';
   console.log(`bundle      : ${p(r.bundle.location)}${from}`);
 
+  // One line per Level 1 step reached, in the order they run (levelOne).
   const l1 = checks.level1;
-  if (l1.index) {
-    if (l1.indexOk) console.log(`L1 OK   ${INDEX_FILE} matches the commitment (${p(l1.index.files)} files listed, ${p(l1.index.bytes)} bytes)`);
-    else {
-      console.log(`L1 FAIL ${INDEX_FILE} does not match the commitment: its entries give ${p(Buffer.from(l1.computed).toString('hex'))}`);
-      console.log('     this is not the index the contract committed to; nothing was fetched or executed.');
+  const idx = l1.index;
+  if (idx && l1.hashOk === false) {
+    console.log(`L1 FAIL ${INDEX_FILE} hash ${p(idx.hash)} is not the event's commitment`);
+    console.log('     this is not the index the contract committed to; nothing else was fetched, hashed or executed.');
+  } else if (idx && l1.hashOk) {
+    console.log(`L1 OK   ${INDEX_FILE} hash is the event's commitment`);
+    if (l1.indexOk) console.log(`L1 OK   ${INDEX_FILE} entries give the same commitment (${p(idx.files)} files listed, ${p(idx.bytes)} bytes)`);
+    else if (l1.indexOk === false) {
+      console.log(`L1 FAIL ${INDEX_FILE} entries give ${p(Buffer.from(l1.computed).toString('hex'))}, not that commitment`);
+      console.log('     this is not the index the contract committed to; nothing else was fetched or executed.');
     }
   }
-  if (l1.ok) {
+  if (l1.filesOk) {
     console.log(`L1 OK   ${p(l1.files)} listed files, each matches its sha256 and size (${p(l1.bytes)} bytes${l1.requests ? `, ${p(l1.requests)} HTTP requests` : ''})`);
-  } else if (!l1.index || l1.indexOk) {
+  }
+  if (l1.compilerOk) console.log(`L1 OK   compiler ${p(compilerText(idx.compiler))} (${INDEX_FILE}) matches the bundle's package.json`);
+  else if (l1.compilerOk === false) {
+    console.log(`L1 FAIL ${p(l1.reason)}`);
+    console.log(`     ${INDEX_FILE}'s compiler is not part of the commitment and must match the committed package.json; nothing was executed.`);
+  }
+  if (!l1.ok && l1.hashOk !== false && l1.indexOk !== false && l1.compilerOk === undefined) {
     console.log(`L1 FAIL ${p(l1.reason)}`);
     console.log('     the bundle is not the one the contract committed to, or could not be obtained; nothing was executed.');
   }

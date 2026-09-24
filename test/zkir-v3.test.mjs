@@ -5,11 +5,11 @@
 // imply, and Level 3 recompiles with it. A bundle may name only flags the verifier
 // knows, because the bundle comes from the party being checked.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assembleBundle, compileFlagsFor } from '../src/bundle.mjs';
-import { LEVEL3_FLAGS, levelThree } from '../src/verify.mjs';
+import { LEVEL3_FLAGS, levelOne, levelThree } from '../src/verify.mjs';
 import { COMPACT, COMPACT_HINT, hasCompact, interfaceOut, interfaceSrc, isBuilt, scratch } from './helpers.mjs';
 
 const key = (tag) => Buffer.concat([Buffer.from(`midnight:verifier-key[${tag}]:`, 'latin1'), Buffer.alloc(64, 7)]);
@@ -42,6 +42,7 @@ describe('compile flags recorded from the key format', () => {
     const b = assembleBundle({ interfaceSrc: interfaceSrc('fungible'), interfaceOut: interfaceOut('fungible'), outDir: join(s.dir, 'bundle-v2'), url: 'https://example.invalid/v2/' });
     const pkg = JSON.parse(readFileSync(join(b.outDir, 'package.json'), 'utf8'));
     expect(Object.keys(pkg.compact)).toEqual(['compiler', 'language', 'runtime', 'interface']);
+    expect(b.index.compiler).toEqual({ name: 'compactc', version: pkg.compact.compiler });
   });
 
   it('Level 3 refuses flags it does not know, before running the compiler', () => {
@@ -69,8 +70,21 @@ describe.skipIf(!hasCompact())(`a ZKIR v3 bundle reaches Level 3 (${hasCompact()
     expect(bundle.compact.flags).toEqual(['--feature-zkir-v3']);
     const pkg = JSON.parse(readFileSync(join(bundle.outDir, 'package.json'), 'utf8'));
     expect(pkg.compact.flags).toEqual(['--feature-zkir-v3']);
+    // index.json names the same compiler and flag (D32).
+    expect(JSON.parse(readFileSync(join(bundle.outDir, 'index.json'), 'utf8')).compiler)
+      .toEqual({ name: 'compactc', version: pkg.compact.compiler, flags: ['--feature-zkir-v3'] });
     for (const f of bundle.keyFiles) {
       expect(readFileSync(join(bundle.outDir, 'out', 'keys', f)).subarray(0, 26).toString('latin1')).toBe('midnight:verifier-key[v7]:');
+    }
+  });
+
+  it('Level 1 accepts the flag in index.json, since the committed package.json records it', async () => {
+    const l1 = await levelOne({ bundleDir: bundle.outDir, committed: bundle.commitment });
+    try {
+      expect(l1).toMatchObject({ ok: true, hashOk: true, indexOk: true, filesOk: true, compilerOk: true });
+      expect(l1.index.compiler.flags).toEqual(['--feature-zkir-v3']);
+    } finally {
+      if (l1.dir) rmSync(l1.dir, { recursive: true, force: true });
     }
   });
 

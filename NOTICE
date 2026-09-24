@@ -29,4 +29,10 @@ the only change is the import path, so that they compose the readable integratio
 module instead of the upstream module directly. They are also MIT, (c) 2025
 Zeppelin Group Ltd, and carry that notice in their headers.
 
+`compact/examples/fungible-private/Interface.compact` adapts the six read
+circuits of `FungibleToken.compact` and the `canonicalize` helper of
+`Utils.compact`, at the same commit: the code is copied with the ledger fields
+renamed and the helpers written inline. It is also MIT, (c) 2025 Zeppelin Group
+Ltd, and carries that notice in its header.
+
 Everything else in this repository is Apache-2.0; see LICENSE.

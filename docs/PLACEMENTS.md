@@ -24,7 +24,7 @@ Measured with `compact` 0.34.0, `@midnight-ntwrk/compact-runtime` 0.19.0 and Led
 - An old event cannot be removed, only superseded.
 - The URL is at most 224 bytes.
 
-**On Stagenet.** The deployments listed under [Evidence on Stagenet](#evidence-on-stagenet) predate the rename: their contracts emitted `bundle/v1`, which the current verifier does not read.
+**On Stagenet.** `5d323316…febaa0f6` emits the public-interface event for the private ERC-20 bundle, and verifies to Level 3 from the public indexer (README, Live on Stagenet). The deployments listed under [Evidence on Stagenet](#evidence-on-stagenet) predate the rename: their contracts emitted `bundle/v1`, which the current verifier does not read.
 
 ## Alternatives studied, not delivered
 

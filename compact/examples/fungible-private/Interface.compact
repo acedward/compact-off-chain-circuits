@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: MIT
+// compact-off-chain-circuits — a private interface for the ERC-20 example,
+// `compact/examples/fungible/Full.compact`.
+//
+// The six read bodies are adapted from OpenZeppelin Compact Contracts
+// v0.3.0-alpha.1 @ 746724f8 (token/FungibleToken.compact, utils/Utils.compact),
+// (c) 2025 Zeppelin Group Ltd, MIT.
+//
+// WHAT IS HIDDEN, AND WHAT IS NOT
+//
+// This file imports no module. It declares the deployed contract's ledger
+// itself: seven fields, in the deployed order and with the deployed types,
+// named hidden1 to hidden7. A verifier key depends on the circuit's logic and
+// on the positions and types of the ledger slots it reads, not on any name, so
+// the six reads below compile to the keys the contract deployed.
+//
+// Published: the six reads, under their deployed entry point names, and their
+// code. The initialization check and the account canonicalization they call
+// are written inline.
+//
+// Hidden: the code of every other circuit of the contract, and the original
+// field names.
+//
+// Still visible, here or on chain: the ledger's shape (seven fields, their
+// positions and types) and its values, every entry point name, and every
+// verifier key.
+
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+
+export { ContractAddress, Either };
+
+// The deployed ledger, slot by slot. Not exported: nothing reads it by name.
+ledger hidden1: Boolean;
+ledger hidden2: Map<Either<Bytes<32>, ContractAddress>, Uint<128>>;
+ledger hidden3: Map<Either<Bytes<32>, ContractAddress>, Map<Either<Bytes<32>, ContractAddress>, Uint<128>>>;
+ledger hidden4: Uint<128>;
+sealed ledger hidden5: Opaque<"string">;
+sealed ledger hidden6: Opaque<"string">;
+sealed ledger hidden7: Uint<8>;
+
+export circuit name(): Opaque<"string"> {
+  assert(hidden1, "FungibleToken: contract not initialized");
+  return hidden5;
+}
+
+export circuit symbol(): Opaque<"string"> {
+  assert(hidden1, "FungibleToken: contract not initialized");
+  return hidden6;
+}
+
+export circuit decimals(): Uint<8> {
+  assert(hidden1, "FungibleToken: contract not initialized");
+  return hidden7;
+}
+
+export circuit totalSupply(): Uint<128> {
+  assert(hidden1, "FungibleToken: contract not initialized");
+  return hidden4;
+}
+
+export circuit balanceOf(account: Either<Bytes<32>, ContractAddress>): Uint<128> {
+  assert(hidden1, "FungibleToken: contract not initialized");
+  const canonAcct = account.is_left
+    ? Either<Bytes<32>, ContractAddress>{ is_left: true, left: account.left, right: default<ContractAddress> }
+    : Either<Bytes<32>, ContractAddress>{ is_left: false, left: default<Bytes<32>>, right: account.right };
+  if (!hidden2.member(disclose(canonAcct))) {
+    return 0;
+  }
+  return hidden2.lookup(disclose(canonAcct));
+}
+
+export circuit allowance(
+  owner: Either<Bytes<32>, ContractAddress>,
+  spender: Either<Bytes<32>, ContractAddress>
+): Uint<128> {
+  assert(hidden1, "FungibleToken: contract not initialized");
+  const canonOwner = owner.is_left
+    ? Either<Bytes<32>, ContractAddress>{ is_left: true, left: owner.left, right: default<ContractAddress> }
+    : Either<Bytes<32>, ContractAddress>{ is_left: false, left: default<Bytes<32>>, right: owner.right };
+  const canonSpender = spender.is_left
+    ? Either<Bytes<32>, ContractAddress>{ is_left: true, left: spender.left, right: default<ContractAddress> }
+    : Either<Bytes<32>, ContractAddress>{ is_left: false, left: default<Bytes<32>>, right: spender.right };
+  if (!hidden3.member(disclose(canonOwner)) || !hidden3.lookup(canonOwner).member(disclose(canonSpender))) {
+    return 0;
+  }
+  return hidden3.lookup(canonOwner).lookup(disclose(canonSpender));
+}

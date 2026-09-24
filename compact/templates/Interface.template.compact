@@ -7,10 +7,11 @@
 //
 // WHAT THIS FILE IS
 //
-// The "partial source": the only Compact source you publish. It contains the
-// circuits you want consumers to be able to run off chain, and nothing else. Its
-// compiled verifier keys are byte-identical to the ones your deployed contract
-// installed on chain, so a consumer can check what they ran against the chain.
+// The "partial source": the Compact source you publish, together with every file
+// it imports. It contains the circuits you want consumers to be able to run off
+// chain. Its compiled verifier keys are byte-identical to the ones your deployed
+// contract installed on chain, so a consumer can check what they ran against the
+// chain.
 //
 // ---------------------------------------------------------------------------
 // INVARIANT 1 — LEDGER LAYOUT
@@ -20,13 +21,22 @@
 // the circuit name itself — is erased by the compiler and does not affect the
 // key. Consequences:
 //
-//   * The reliable way to reproduce the layout is to import the SAME module your
-//     deployed contract imports, and declare no ledger here. Do that whenever the
-//     contract's state lives in a module (as it does for the OpenZeppelin
-//     integrations in this repository).
-//   * If your contract declares its ledger inline, repeat EVERY declaration here
-//     in the original order with the original types. You may rename them. You may
-//     append extra declarations AFTER all of them.
+//   * The open way: import the SAME module your deployed contract imports, and
+//     declare no ledger here. This reproduces the layout by construction (the
+//     OpenZeppelin interfaces in this repository do it), but the bundle then
+//     publishes that module's whole source, every circuit body in it included.
+//   * The private way: import no module and declare the ledger here, repeating
+//     EVERY declaration in the deployed order with the deployed types. You may
+//     rename them; `compact/examples/fungible-private/Interface.compact` names
+//     them hidden1, hidden2 and so on. Then copy each published circuit's code
+//     into this file, with the helpers it calls, and keep its statements in the
+//     original order: the key follows the order of the statements, not only
+//     what they compute. Assert messages, `sealed`, and whether a helper is a
+//     separate circuit or written inline do not change it. The bundle then shows
+//     only the published circuits' code; the ledger's shape, every entry point
+//     name and every key stay visible on chain.
+//   * If your contract declares its ledger inline, the private way is the only
+//     way. You may append extra declarations AFTER all of the deployed ones.
 //   * What counts is the declaration order inside the module or contract whose
 //     ledger it is. A ledger declaration written in THIS file always takes the
 //     slot after every slot the imported module declares, wherever you put it
@@ -48,9 +58,10 @@
 // ---------------------------------------------------------------------------
 //   * Only impure, witness-free circuits. A circuit that calls a witness takes a
 //     private input; it is not a read and the consumer tool refuses to run it.
-//   * Only circuits you are willing to publish the body of. Unpublished circuits
-//     keep their bodies private; their entry point names and verifier keys are
-//     visible on chain regardless.
+//   * Only circuits you are willing to publish the body of. The bundle publishes
+//     this file and every file it imports: the whole module on the open way, this
+//     file alone on the private way. Every circuit's entry point name and
+//     verifier key are visible on chain regardless.
 //   * `publishBundle` itself does not need to be listed: consumers do not execute
 //     it.
 
@@ -63,6 +74,9 @@ import CompactStandardLibrary;
 // integrations that is, for example:
 //
 //     import "../integrations/openzeppelin/FungibleTokenReadable" prefix FungibleTokenReadable_;
+//
+// For the private way, delete this import and declare the ledger here instead
+// (INVARIANT 1).
 //
 import "./TODO_ReplaceWithYourModule" prefix YourModule_;
 

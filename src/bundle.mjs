@@ -221,22 +221,30 @@ listed file fails verification; extra files on the host are ignored.
 `;
 }
 
-/** Repository examples, so `deploy-check --example nft` needs no paths. */
+/**
+ * Repository examples, so `deploy-check --example nft` needs no paths. An entry
+ * with `deployed` is a second interface for that example's contract:
+ * fungible-private imports no module and declares the ledger under hidden names.
+ */
 export const EXAMPLES = {
   fungible: { module: 'FungibleTokenReadable' },
   nft: { module: 'NonFungibleTokenReadable' },
   multi: { module: 'MultiTokenReadable' },
+  'fungible-private': { source: ['examples', 'fungible-private', 'Interface.compact'], deployed: 'fungible' },
 };
 
 /** Resolve `--example <name>` against this repository's layout. */
 export function exampleLayout(name, repoRoot = dirname(HERE)) {
   const ex = EXAMPLES[name];
   if (!ex) throw new Error(`unknown example '${name}'; known: ${Object.keys(EXAMPLES).join(', ')}`);
+  const deployed = ex.deployed ?? name;
   return {
-    interfaceSrc: join(repoRoot, 'compact', 'integrations', 'openzeppelin', `${ex.module}.Interface.compact`),
+    interfaceSrc: ex.source
+      ? join(repoRoot, 'compact', ...ex.source)
+      : join(repoRoot, 'compact', 'integrations', 'openzeppelin', `${ex.module}.Interface.compact`),
     interfaceOut: join(repoRoot, 'build', name, 'interface'),
-    fullOut: join(repoRoot, 'build', name, 'full'),
-    fullSrc: join(repoRoot, 'compact', 'examples', name, 'Full.compact'),
+    fullOut: join(repoRoot, 'build', deployed, 'full'),
+    fullSrc: join(repoRoot, 'compact', 'examples', deployed, 'Full.compact'),
   };
 }
 

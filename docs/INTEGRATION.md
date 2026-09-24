@@ -18,10 +18,10 @@ erased by the compiler and do not affect the key.
 
 1. **Ledger layout.** The interface source you publish must reproduce the
    deployed contract's ledger slots in the original order with the original
-   types. Importing the *same module* the deployed contract imports does this by
-   construction and is the recommended way. If your ledger is declared inline in
-   the contract, repeat every declaration in the interface, in the original
-   order; you may rename them, and you may append new ones after all of them.
+   types. There are two ways, described in Step 2: import the *same module* the
+   deployed contract imports, which does this by construction, or declare every
+   field in the interface yourself, in the original order and with the original
+   types; you may rename them, and you may append new ones after all of them.
    Inserting or reordering a declaration that precedes a slot a published circuit
    reads changes the key.
 
@@ -81,10 +81,39 @@ only that one.
 ## Step 2 — write the interface source
 
 Copy `compact/templates/Interface.template.compact`, rename it
-`<YourContract>.Interface.compact`, and fill in the two `TODO`s: the module import
-and one `export circuit` per circuit you publish. Publish only impure,
-**witness-free** circuits — a circuit that calls a witness takes a private input,
-is not a read, and the consumer tool refuses to execute it.
+`<YourContract>.Interface.compact`, and fill in the two `TODO`s: how the
+interface gets the ledger layout, and one `export circuit` per circuit you
+publish. Publish only impure, **witness-free** circuits — a circuit that calls a
+witness takes a private input, is not a read, and the consumer tool refuses to
+execute it.
+
+The bundle publishes the interface and every file it imports. That decides
+what stays private:
+
+* **Import the module (open).** Import the module the deployed contract imports
+  and call its circuits, as `compact/integrations/openzeppelin/*.Interface.compact`
+  do. The layout is right by construction, but the bundle publishes that
+  module's whole source: every circuit body in it, including the circuits you do
+  not publish, and its field names.
+* **Declare the ledger (private).** Import no module. Declare every ledger field
+  in the deployed order, with the deployed types, under names of your choice,
+  and copy each published circuit's code into the interface, with the helpers it
+  calls. `compact/examples/fungible-private/Interface.compact` does this for the
+  ERC-20 example: its fields are `hidden1` to `hidden7`, it contains the six reads
+  and nothing else, and its six keys equal the deployed contract's. Its bundle
+  shows only the published circuits' code. The other circuits' code and the field
+  names stay private. The ledger's shape (the number of fields, their positions
+  and their types), every entry point name and every verifier key stay visible,
+  as they are for any contract on chain. A contract that declares its ledger
+  inline, rather than in a module, has only this way.
+
+On the private way, copy each circuit's statements in their original order. The
+key follows the order of the statements, not only what they compute: in the
+ERC-20 example, canonicalizing the spender before the owner in `allowance`, or
+splitting its `a || b` into two `if` statements, changes its key. Assert
+messages, `sealed`, `export`, parameter names, where `disclose` sits, and whether
+a helper is a separate circuit or written inline do not change it. `deploy-check`
+compares every key with your full build either way.
 
 ## Step 3 — build both
 
@@ -245,8 +274,10 @@ different compilations. It reads the table as text; the file is not run.
 ## Checklist
 
 - [ ] `publishBundle` exported from the deployed contract.
-- [ ] Interface imports the same module (or repeats the ledger declarations in
-      order) and declares no ledger before them.
+- [ ] Interface imports the same module (open: the bundle publishes the module)
+      or declares every ledger field in the deployed order and types (private:
+      the bundle publishes only the interface), and declares no ledger before
+      them.
 - [ ] Published circuits keep their deployed entry point names.
 - [ ] No published circuit uses a witness.
 - [ ] `deploy-check` exits 0 and prints a payload.

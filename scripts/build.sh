@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Compiles every published interface and every deployable example, then asserts
 # that each interface circuit's verifier key is byte-identical to the one the
-# example contract deploys (scripts/check-keys.mjs lists the pairs).
+# example contract deploys (scripts/check-keys.mjs lists the pairs). The fungible
+# example has two interfaces: the open one, which imports its module, and the
+# private one in compact/examples/fungible-private/, which imports none.
 #
 #   scripts/build.sh                 incremental (skips a target whose output is
 #                                    newer than every .compact source)
@@ -56,6 +58,9 @@ for i in "${!TOKENS[@]}"; do
   t="${TOKENS[$i]}"; m="${MODULES[$i]}"
   compile "$ROOT/compact/integrations/openzeppelin/$m.Interface.compact" "$ROOT/build/$t/interface" "$t/interface ($m.Interface.compact)"
 done
+# The second, private interface of the fungible example. It has no contract of
+# its own; check-keys compares it with build/fungible/full.
+compile "$ROOT/compact/examples/fungible-private/Interface.compact" "$ROOT/build/fungible-private/interface" "fungible-private/interface (examples/fungible-private/Interface.compact)"
 
 if [ "$INTERFACES_ONLY" -eq 1 ]; then
   echo "(--interfaces: skipping example contracts and the key check)"

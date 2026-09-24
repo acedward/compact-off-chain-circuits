@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as rt from '@midnight-ntwrk/compact-runtime';
+import { EXAMPLES } from '../src/bundle.mjs';
 import { PUBLIC_INTERFACE_EVENT_HEX } from '../src/event.mjs';
 import { assemblePayload, indexCommitment, indexUrlFor, readIndexFile } from '../src/hash.mjs';
 
@@ -143,17 +144,20 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const example = process.argv[2];
   const url = process.argv[3] ?? `https://example.invalid/${example}/`;
   const bundleDir = process.argv[4] ?? join(REPO, 'bundle', example);
-  if (!example || !SCENARIOS[example]) {
-    console.error(`usage: simulate-deploy.mjs <${Object.keys(SCENARIOS).join('|')}> [url] [bundle dir]`);
+  // A second interface (fungible-private) deploys the contract of the example it belongs to.
+  const contract = (example && EXAMPLES[example]?.deployed) ?? example;
+  const names = [...new Set([...Object.keys(SCENARIOS), ...Object.keys(EXAMPLES)])];
+  if (!example || !Object.hasOwn(SCENARIOS, contract ?? '')) {
+    console.error(`usage: simulate-deploy.mjs <${names.join('|')}> [url] [bundle dir]`);
     console.error('(run src/deployer.mjs first so the bundle directory exists)');
     process.exit(2);
   }
   const out = join(REPO, 'sim', example);
   mkdirSync(out, { recursive: true });
-  const s = await simulate(example, { bundleDir, url });
+  const s = await simulate(contract, { bundleDir, url });
   writeFileSync(join(out, 'state.hex'), s.state.toString('hex'));
   writeFileSync(join(out, 'event-payload.hex'), s.eventPayload.toString('hex'));
-  console.log(`example      : ${example}`);
+  console.log(`example      : ${example}${contract !== example ? ` (the ${contract} contract)` : ''}`);
   console.log(`bundle       : ${bundleDir}`);
   console.log(`event        : eventType=${s.eventType} name=${s.eventName} atom=Bytes<${s.eventAtomBytes}>`);
   console.log(`url          : ${s.url}`);

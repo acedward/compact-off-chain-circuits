@@ -58,9 +58,10 @@ commitment    = C encoded in 32 bytes: y little-endian, top bit = x mod 2
 
 ## Partial source
 
-A verifier key depends only on circuit logic and on the positions and types of the ledger slots the circuit reads; the compiler erases every identifier. So:
+A verifier key depends only on circuit logic, including the order of its statements, and on the positions and types of the ledger slots the circuit reads; the compiler erases every identifier. So:
 
-- An interface that imports the deployed contract's module keeps that module's slots in the same order, and compiles the circuits it exports to byte-identical keys.
+- An interface that imports the deployed contract's module keeps that module's slots in the same order, and compiles the circuits it exports to byte-identical keys. It also publishes the module's whole source.
+- An interface can instead declare the ledger itself, in the deployed order and with the deployed types, under any names, and copy only the published circuits' code, keeping each circuit's statements in order. It compiles to the same keys and publishes nothing else (`compact/examples/fungible-private/`).
 - Slot order is the declaration order inside the module that owns the ledger. A ledger declared in the interface file lands after the module's slots. It leaves their paths, and so their keys, unchanged while the total stays at 15 fields or fewer; above that, Compact regroups the fields ([layout rules](PLACEMENTS.md#layout-rules)).
 - A published circuit keeps its deployed entry point name, because the chain stores each key under that name.
 

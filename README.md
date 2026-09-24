@@ -4,7 +4,7 @@ Run a Midnight contract's read circuits off chain, against its current state, an
 
 A contract commits to a small bundle: a partial Compact source containing only the circuits you want readable, plus what it compiles to. It publishes a 32-byte commitment and the URL of the bundle's `index.json` in one event, and the newest event wins. Anyone can then call those circuits locally, with no transaction and no proof, and verify the result at three levels. The bundle is a light binding. It carries verifier keys and the generated wrapper, never prover keys or zkir, which run to tens or hundreds of megabytes.
 
-The examples apply the pattern to OpenZeppelin's FungibleToken, NonFungibleToken and MultiToken, used unmodified, to show it is compatible with that well-known implementation and makes metadata such as `name`, `symbol`, `decimals`, `tokenURI` and `uri` readable. Targets Midnight 2.x (Ledger v9).
+The examples apply the pattern to OpenZeppelin's FungibleToken, NonFungibleToken and MultiToken, used unmodified, to show it is compatible with that well-known implementation and makes metadata such as `name`, `symbol`, `decimals`, `tokenURI` and `uri` readable. A second, private interface for the ERC-20 publishes only its reads: its ledger fields are named `hidden1` to `hidden7`, and no other circuit's code is published. Targets Midnight 2.x (Ledger v9).
 
 The ERC-20 example is deployed on Midnight Stagenet, and its bundle is published at https://compact-off-chain-circuits.pages.dev/erc20/index.json, a real `index.json` to look at. [Live on Stagenet](#live-on-stagenet) has the contract and its commitment.
 
@@ -32,7 +32,9 @@ For a contract author. The full procedure and a checklist are in [docs/INTEGRATI
 
    The OpenZeppelin examples in `compact/integrations/openzeppelin/` show this step applied to unmodified OpenZeppelin token modules.
 
-2. **Write the interface.** Copy `compact/templates/Interface.template.compact`, import the same module your contract imports, and export the read circuits you want to publish under their deployed names. For an ERC-20 style token, the interface publishes the six ERC-20 reads, as in `compact/integrations/openzeppelin/FungibleTokenReadable.Interface.compact`:
+2. **Write the interface.** Copy `compact/templates/Interface.template.compact` and export the read circuits you want to publish, under their deployed names. The interface must give them the deployed ledger, in one of two ways.
+
+   **Open: import the same module your contract imports.** It is simple, but the bundle then publishes that module's whole source, including the circuits you do not publish. For an ERC-20 style token, the interface publishes the six ERC-20 reads, as in `compact/integrations/openzeppelin/FungibleTokenReadable.Interface.compact`:
 
    ```compact
    pragma language_version >= 0.23.0;
@@ -53,7 +55,20 @@ For a contract author. The full procedure and a checklist are in [docs/INTEGRATI
    }
    ```
 
-   Transfers, approvals and minting stay unpublished. Their bodies stay private, though their entry point names are visible on chain.
+   **Private: declare the ledger yourself.** Declare the fields in the deployed order and with the deployed types, under any names, and copy only the code of the circuits you publish, keeping each one's statements in order. The keys are the same, and nothing else is published. As in `compact/examples/fungible-private/Interface.compact`:
+
+   ```compact
+   ledger hidden1: Boolean;
+   ledger hidden2: Map<Either<Bytes<32>, ContractAddress>, Uint<128>>;
+   // … hidden3 to hidden7, in the deployed order and with the deployed types
+
+   export circuit totalSupply(): Uint<128> {
+     assert(hidden1, "FungibleToken: contract not initialized");
+     return hidden4;
+   }
+   ```
+
+   Either way, transfers, approvals and minting stay unpublished, and their entry point names are visible on chain. Their code is in the open bundle, inside the module's source, but not in the private one.
 
 3. **Build both.**
 
@@ -140,7 +155,7 @@ Arguments must fit the circuit's types exactly; nothing is padded or cut. A `Byt
 - **The contract commits to a bundle.** `publishBundle` emits one event, the public-interface event, carrying the bundle's 32-byte commitment and the URL of its `index.json`. A contract has one interface, and the newest event wins.
 - **A bundle is a folder of files.** `index.json` lists each file with its sha256 and size: the partial source, one verifier key per published circuit, the compiled wrapper `index.js`, the compiler's `contract-info.json`, and a `package.json` that pins the compiler version.
 - **The commitment covers every listed file.** Changing, adding or removing any file changes it.
-- **A partial source compiles to the deployed keys.** A circuit's verifier key depends on its logic and on where the ledger fields it reads sit, not on any name. So an interface that imports the deployed contract's modules, and exports only some circuits, gets the same keys.
+- **A partial source compiles to the deployed keys.** A circuit's verifier key depends on its logic and on where the ledger fields it reads sit, not on any name. So an interface that exports only some circuits gets the same keys, whether it imports the deployed contract's modules or declares the ledger itself under other names, keeping the fields' order and types and each circuit's statements in order.
 - **Reads run locally.** The verifier calls the circuit through the wrapper against the contract state, in a separate process, as midnight-js does before proving, and stops there: no transaction, no proof.
 
 The exact formats and rules are in [docs/FORMAT.md](docs/FORMAT.md).
@@ -153,8 +168,8 @@ The format sets no limit on the number of files, their sizes or fetch time, and 
 |---|---|---|
 | Files listed in `index.json` | 13 to 17 | 1,000 |
 | `index.json` | 2 to 3 KB | 256 KB |
-| Whole bundle | 86 to 122 KB | 16 MB |
-| Largest file, the generated wrapper | 44 KB | 8 MB |
+| Whole bundle | 79 to 122 KB | 16 MB |
+| Largest file, the generated wrapper | 50 KB | 8 MB |
 | Computing the commitment | 7 ms | 1 s |
 | Fetching the files, one at a time | 17 requests | 5 minutes |
 | Level 3 recompile | about 1 s | 30 minutes |
@@ -171,16 +186,17 @@ You need `compact` 0.34.0 and Node 20 or later. The example contracts take sever
 
 ```sh
 npm ci
-scripts/build.sh                  # compiles 3 example contracts and 3 interfaces, then checks keys
-node scripts/check-keys.mjs       # 13 IDENTICAL, 0 not identical
-npm test                          # 257 tests, about a minute and a half
+scripts/build.sh                  # compiles 3 example contracts and 4 interfaces, then checks keys
+node scripts/check-keys.mjs       # 19 IDENTICAL, 0 not identical
+npm test                          # 283 tests, about a minute and a half
 ```
 
 The test data are OpenZeppelin's three token contracts, with deployments simulated locally: the contract state with its verifier keys installed, as a real deploy does. The tests check these claims (files in `test/`):
 
 | Claim | How it is checked | Tests |
 |---|---|---|
-| An interface compiles to the deployed keys | every published circuit's key equals the deployed contract's, byte for byte (13 keys); renaming fields keeps a key, inserting a field before one it reads changes it | `check-keys`, `keys`, `layout` |
+| An interface compiles to the deployed keys | every published circuit's key equals the deployed contract's, byte for byte (19 keys); renaming fields keeps a key, inserting a field before one it reads changes it | `check-keys`, `keys`, `layout` |
+| A private interface publishes only its reads | with the ledger declared as `hidden1` to `hidden7`, its six keys equal the deployed ones; its bundle holds no deployed field name and no unpublished circuit; it reaches Level 3 and reads the same values as the open bundle | `private` |
 | The reusable parts stand alone | the pattern module compiles alone in an unrelated project; the integrations compile with only their dependencies | `isolation` |
 | The whole flow works | for each example: build a bundle, simulate a deployment, pass Levels 1 to 3 and read values; the recompile reproduces the keys and the wrapper | `simulate`, `level3` |
 | Tampering is caught | a changed file, a changed index, a swapped key, extra files or a planted runtime from the host: each stops verification at the right level, before anything runs | `tamper`, `fetch`, `runtime-pinning` |
@@ -201,7 +217,7 @@ node src/verify.mjs --bundle bundle/nft \
   --circuit tokenURI --args 1 --level 3
 ```
 
-It prints two `L1 OK` lines (the index, then its 16 files), five `L2 OK`, seven `L3 OK` and `tokenURI(1) = "https://nft.example/meta/1.json"`. Use `fungible` instead of `nft` to read `name`, `symbol`, `decimals` and `totalSupply`, or `multi` to read `uri`. `--args 999` shows a failed assertion (exit 3). Changing one byte of any bundle file fails Level 1 (exit 1).
+It prints two `L1 OK` lines (the index, then its 16 files), five `L2 OK`, seven `L3 OK` and `tokenURI(1) = "https://nft.example/meta/1.json"`. Use `fungible` instead of `nft` to read `name`, `symbol`, `decimals` and `totalSupply`, `fungible-private` for the same reads through the private interface, or `multi` to read `uri`. `--args 999` shows a failed assertion (exit 3). Changing one byte of any bundle file fails Level 1 (exit 1).
 
 To check the HTTP path, serve the bundles with any static server and point `verify` at the index. It fetches the index and its 16 files, 17 requests in all, before running the circuit:
 
@@ -220,6 +236,7 @@ compact/templates/Interface.template.compact  starting point for your interface
 compact/integrations/openzeppelin/            example: unmodified OpenZeppelin tokens with publishBundle, and their interfaces
 compact/vendor/openzeppelin/                  upstream v0.3.0-alpha.1 @ 746724f8, unmodified, MIT
 compact/examples/*/Full.compact               deployable contracts used by the tests
+compact/examples/fungible-private/            the private ERC-20 interface: hidden ledger names, only the published reads
 src/                                          deployer, verify, event, escape, fetch, hash, indexer, execute, load, bundle
 scripts/                                      build.sh, check-keys.mjs, simulate-deploy.mjs
 test/                                         vitest suite
@@ -238,7 +255,7 @@ live/stagenet/                                the Stagenet deployments, their sc
 - **Only listed files are used.** The verifier downloads only what `index.json` lists, into a private folder, and pins the wrapper's runtime to its own. Extra files a host serves, such as a planted `node_modules`, are ignored.
 - **The commitment is binding**, because its group-hash points have unknown discrete logarithms. Index sizes only bound downloads; every file's sha256 is checked.
 - **The indexer is trusted** to serve the real contract state. Run your own to remove that trust.
-- **Some things stay public.** Unpublished circuits keep their bodies private, but every entry point name and verifier key is visible on chain. `publishBundle` has the same key in every contract, so it shows which contracts use this pattern.
+- **Some things stay public.** An unpublished circuit's code stays private only if no published file contains it. Importing a module publishes that module's whole source; a private interface publishes only its reads. Either way, every entry point name, every verifier key and the ledger's shape (positions and types) are visible on chain. `publishBundle` has the same key in every contract, so it shows which contracts use this pattern.
 
 ## Live on Stagenet
 
@@ -299,4 +316,4 @@ Checking keys and running reads needs only the contract state. Contracts compile
 
 ## License
 
-Apache-2.0. The vendored OpenZeppelin sources under `compact/vendor/` are MIT; see `NOTICE`.
+Apache-2.0. The vendored OpenZeppelin sources under `compact/vendor/`, and the private interface adapted from them (`compact/examples/fungible-private/`), are MIT; see `NOTICE`.

@@ -4,23 +4,26 @@
 
 This repository contains a Draft MIP and a reference implementation for
 discovering, verifying, and locally evaluating Compact public-state interfaces.
-A contract emits an event containing a bundle commitment and index URI.
+A contract emits an event identifying a bundle commitment and retrieval
+location.
 A consumer can then check the committed files, compare published verifier keys
 with named installed operations, and reproduce the generated artifacts.
 
-The normative proposal is [MIP-SPEC-DRAFT.md](MIP-SPEC-DRAFT.md). It makes
-three independent gates explicit:
+The [MIP methodology](MIP-SPEC-DRAFT.md) makes three separate conditions
+explicit:
 
-1. Levels 1–3 verify bundle integrity, installed keys, and reproduced artifacts.
+1. Cumulative Levels 1–3 establish bundle integrity, same-name installed-key
+   equality, and source-based artifact reproduction.
 2. Read eligibility excludes witnesses, effects, and unsupported execution
    context.
 3. Compilation and execution require real host confinement.
 
-The current implementation is a prototype. It implements useful verification
-checks, but it does not yet implement the Draft's strict payload/JSON parsing,
-complete snapshot identity, read-effect/context monitor, or security sandbox.
-Its `L1`, `L2`, and `L3` output describes the checks it currently performs, not
-full conformance with every requirement in the Draft.
+The MIP does not standardize a wire format, bundle schema, toolchain, or command
+line. This repository provides one concrete prototype. It demonstrates useful
+versions of Levels 1–3, but it does not yet establish complete effect/context
+eligibility, secure host confinement, or a cryptographically authenticated
+common event/state snapshot. Its `L1`, `L2`, and `L3` output describes the
+checks it currently performs, not full conformance with the methodology.
 
 An interface can be open or partial-source:
 
@@ -54,11 +57,11 @@ MIT; see [NOTICE](NOTICE).
 
 ## How to
 
-### Contract owners: how to implement the spec
+### Contract owners: how to use the reference format
 
 Use `compact/OffChainInterface.compact` and the bundle assembler
-`src/deployer.mjs` (`coc-deploy-check`). The Draft is authoritative when these
-instructions differ from it.
+`src/deployer.mjs` (`coc-deploy-check`). These steps document this repository's
+format; the MIP is authoritative for the methodology and guarantee labels.
 
 1. Import the publisher module and expose its event circuit:
 
@@ -119,7 +122,7 @@ instructions differ from it.
    The prototype compares the interface keys with the local full build, writes
    the bundle, and prints the index URI, commitment, and 256-byte payload. This
    does not compare against live installed state and does not establish the
-   Draft's read-eligibility rules.
+   methodology's read-eligibility conditions.
 
 5. Host the exact bundle bytes. Keep every published version immutable.
 
@@ -217,7 +220,8 @@ The prototype CLI currently accepts these argument spellings:
 - `Either`: `key:<hex>` or `addr:<hex>`;
 - `Maybe`: `none` or `some:<value>`.
 
-These are CLI spellings; the typed value rules are in the MIP.
+These are CLI spellings for this implementation. Other implementations can use
+different representations while still reporting the typed arguments they used.
 
 The repository includes a historical Stagenet deployment:
 
@@ -252,7 +256,7 @@ network, event, state, and observation limitations.
 
 ## Spec
 
-The complete normative event, payload, index, commitment, lifecycle,
-verification, eligibility, execution, failure, privacy, versioning, and vector
-definitions are in [MIP-SPEC-DRAFT.md](MIP-SPEC-DRAFT.md). This README is an
-operator guide and does not define alternate protocol behavior.
+The [MIP](MIP-SPEC-DRAFT.md) defines the high-level publication, verification,
+and local-read methodology and the meaning of its guarantees. This README is an
+operator guide for one implementation's formats, tools, and commands; those
+details are not universal methodology requirements.

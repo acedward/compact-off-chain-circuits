@@ -1,23 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-// Stagenet wallet status and DUST registration for the live deployment.
+// Stagenet wallet status and DUST registration for the live example's deployment.
 //
-//   node --env-file=../../.env wallet.mjs                  # sync, print NIGHT and DUST
-//   MODE=register node --env-file=../../.env wallet.mjs    # also register NIGHT for DUST
+//   node --env-file=<file outside this repository> wallet.mjs                  # sync, print NIGHT and DUST
+//   MODE=register node --env-file=<file outside this repository> wallet.mjs    # also register NIGHT for DUST
 //
-// Ported from scripts/register-dust.ts of the earlier ERC-7496 token-metadata contracts
-// (commit 17216362),
-// which deployed to Stagenet with the same toolchain. Reads STAGENET_WALLET_MNEMONIC,
-// derives the BIP-39 seed in memory and never prints it. A registration is
-// signature-only and needs no proof server.
-import { mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english.js';
+// A transaction pays its fees in DUST, which registered NIGHT generates. Reads
+// STAGENET_WALLET_MNEMONIC from the env file, derives the BIP-39 seed in memory
+// and never prints it. A registration is signature-only and needs no proof server.
+import { mnemonicToSeedSync } from '@scure/bip39';
 import * as ledger from '@midnightntwrk/ledger-v9';
 import { DustWallet } from '@midnightntwrk/wallet-sdk-dust-wallet';
 import { WalletFacade } from '@midnightntwrk/wallet-sdk-facade';
 import { HDWallet, Roles } from '@midnightntwrk/wallet-sdk-hd';
 import { ShieldedWallet } from '@midnightntwrk/wallet-sdk-shielded';
 import { createKeystore, PublicKey, UnshieldedWallet } from '@midnightntwrk/wallet-sdk-unshielded-wallet';
-import { stagenet } from './profile.mjs';
+import { SettingError, checkEnvFiles, stagenet, walletMnemonic } from './profile.mjs';
 
 const log = (event, fields = {}) => console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...fields }));
 const json = (value) => JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
@@ -27,8 +24,15 @@ const networkId = profile.networkId;
 const mode = process.env.MODE ?? 'estimate';
 const dustWaitMs = Number(process.env.DUST_WAIT_MS ?? '600000');
 
-const mnemonic = (process.env.STAGENET_WALLET_MNEMONIC ?? '').trim().split(/\s+/).join(' ');
-if (!validateMnemonic(mnemonic, wordlist)) throw new Error('STAGENET_WALLET_MNEMONIC is missing or not a valid BIP-39 mnemonic');
+let mnemonic;
+try {
+  checkEnvFiles();
+  mnemonic = await walletMnemonic();
+} catch (e) {
+  if (!(e instanceof SettingError)) throw e;
+  console.error(`error: ${e.message}`);
+  process.exit(2);
+}
 const hd = HDWallet.fromSeed(mnemonicToSeedSync(mnemonic));
 if (hd.type !== 'seedOk') throw new Error('invalid wallet seed');
 const derived = hd.hdWallet.selectAccount(0).selectRoles([Roles.Zswap, Roles.NightExternal, Roles.Dust]).deriveKeysAt(0);

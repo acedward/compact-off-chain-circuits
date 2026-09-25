@@ -290,7 +290,7 @@ describe('the live private bundle (deploy-tools/site/public-interface/erc20-priv
   const deployment = join(REPO, 'deploy-tools', 'deployment.json');
 
   it('its index.json carries hash and compiler, and still gives the commitment the contract published', async () => {
-    const rec = readJson(deployment).privateInterface.bundle;
+    const rec = readJson(deployment).bundle;
     const published = Buffer.from(rec.payload, 'hex').subarray(0, 32);
     expect(published.toString('hex')).toBe('4814bf93c6c0a6c81c7839f9be72c80365c2a4179d58171e7acd40906be30891');
     expect(rec.commitment).toBe(published.toString('hex'));

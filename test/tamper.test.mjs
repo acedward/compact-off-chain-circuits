@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// SC-002 / US1-AS3 / US1-AS4: the edits an attacker or a careless host can make
-// must each be caught, and must stop execution.
+// The edits an attacker or a careless host can make must each be caught, and
+// must stop execution.
 //
 //   any one-byte change to any listed file       -> Level 1 fails, naming the file
 //   any change to index.json's entries           -> Level 1 fails on the commitment
@@ -35,7 +35,7 @@ describe.skipIf(!isBuilt())(`tampering (${isBuilt() ? 'built' : BUILD_HINT})`, (
 
   // One bit changed in each of these, after the event was emitted.
   for (const file of ['out/contract/index.js', 'out/keys/tokenURI.verifier', 'out/compiler/contract-info.json',
-                      'src/integrations/openzeppelin/NonFungibleTokenReadable.Interface.compact', 'README.md']) {
+                      'src/compact-examples/openzeppelin/NonFungibleTokenReadable.Interface.compact', 'README.md']) {
     it(`Level 1 catches a one-bit change to ${file} and names it`, async () => {
       const bundle = freshBundle(`edit-${file.replace(/\W/g, '_')}`);
       const sim = await simulate('nft', { bundleDir: bundle.outDir, url: URL });

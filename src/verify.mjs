@@ -39,7 +39,7 @@
 // compiler; a version other than the one package.json pins is only reported.
 //
 // The commitment and URL come from the contract's newest public-interface event
-// (the `Misc` event publishBundle emits; docs/FORMAT.md defines it), read from
+// (the `Misc` event publishBundle emits; the README's Spec defines it), read from
 // an indexer, or from an event payload supplied directly.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';

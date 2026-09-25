@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: Apache-2.0
+// MIP-xxxx: Public Interfaces for Compact Contracts — the interface template.
+//
+// Copy this file next to your contract, rename it <YourContract>.Interface.compact,
+// and fill in the two places marked TODO. It does NOT compile until you do: the
+// import below points at a module that does not exist.
+//
+// WHAT THIS FILE IS
+//
+// The "partial source": the Compact source you publish, together with every file
+// it imports. It contains the circuits you want consumers to be able to run off
+// chain. Its compiled verifier keys are byte-identical to the ones your deployed
+// contract installed on chain, so a consumer can check what they ran against the
+// chain.
+//
+// ---------------------------------------------------------------------------
+// INVARIANT 1 — LEDGER LAYOUT
+// ---------------------------------------------------------------------------
+// A verifier key is determined by ledger slot positions, slot types and circuit
+// logic. Every identifier — ledger field names, struct names, parameter names,
+// the circuit name itself — is erased by the compiler and does not affect the
+// key. Consequences:
+//
+//   * The open way: import the SAME module your deployed contract imports, and
+//     declare no ledger here. This reproduces the layout by construction (the
+//     OpenZeppelin interfaces in this repository do it), but the bundle then
+//     publishes that module's whole source, every circuit body in it included.
+//   * The private way: import no module and declare the ledger here, repeating
+//     EVERY declaration in the deployed order with the deployed types. You may
+//     rename them; `compact-examples/fungible-private/Interface.compact` names
+//     them hidden1, hidden2 and so on. Then copy each published circuit's code
+//     into this file, with the helpers it calls, and keep its statements in the
+//     original order: the key follows the order of the statements, not only
+//     what they compute. Assert messages, `sealed`, and whether a helper is a
+//     separate circuit or written inline do not change it. The bundle then shows
+//     only the published circuits' code; the ledger's shape, every entry point
+//     name and every key stay visible on chain.
+//   * If your contract declares its ledger inline, the private way is the only
+//     way. You may append extra declarations AFTER all of the deployed ones.
+//   * What counts is the declaration order inside the module or contract whose
+//     ledger it is. A ledger declaration written in THIS file always takes the
+//     slot after every slot the imported module declares, wherever you put it
+//     relative to the import line, so it cannot shift them. Changing the order
+//     inside the module can.
+//   * Inserting or reordering a declaration that precedes a slot a published
+//     circuit reads shifts that slot and changes the key. `deploy-check` compares
+//     against your full build and refuses to publish when that happens.
+//
+// ---------------------------------------------------------------------------
+// INVARIANT 2 — ENTRY POINT NAMES
+// ---------------------------------------------------------------------------
+// The chain stores each verifier key under the entry point name your deployed
+// contract exported, and consumers look keys up by that name. Export each circuit
+// here under exactly the deployed name, even though the key does not depend on it.
+//
+// ---------------------------------------------------------------------------
+// WHAT TO PUT HERE
+// ---------------------------------------------------------------------------
+//   * Only impure, witness-free circuits. A circuit that calls a witness takes a
+//     private input; it is not a read and the consumer tool refuses to run it.
+//   * Only circuits you are willing to publish the body of. The bundle publishes
+//     this file and every file it imports: the whole module on the open way, this
+//     file alone on the private way. Every circuit's entry point name and
+//     verifier key are visible on chain regardless.
+//   * `publishBundle` itself does not need to be listed: consumers do not execute
+//     it.
+
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+
+// TODO(1): import the SAME module your deployed contract imports, by a path
+// relative to this file. For a contract built on this repository's OpenZeppelin
+// examples that is, from compact/, for example:
+//
+//     import "../compact-examples/openzeppelin/FungibleTokenReadable" prefix FungibleTokenReadable_;
+//
+// For the private way, delete this import and declare the ledger here instead
+// (INVARIANT 1).
+//
+import "./TODO_ReplaceWithYourModule" prefix YourModule_;
+
+// Re-export the standard library types your circuit signatures mention, so the
+// generated TypeScript declares them. Drop any you do not use.
+export { ContractAddress, Either, Maybe };
+
+// TODO(2): one export per circuit you publish, named exactly as the deployed
+// contract exports it. Example shape:
+
+export circuit exampleRead(id: Uint<128>): Opaque<"string"> {
+  return YourModule_exampleRead(id);
+}
+
+// ---------------------------------------------------------------------------
+// THEN
+// ---------------------------------------------------------------------------
+//   compact compile <this file> out/interface
+//   coc-deploy-check --interface out/interface --interface-src <this file> \
+//                    --full out/full --url https://you.example/bundle/
+//   upload the bundle directory as is; the event URL is its index.json
+//   call publishBundle(<printed payload>) once, from any account that can call
+//     your contract
+//
+// The README's "Contract owners" section has the full procedure.

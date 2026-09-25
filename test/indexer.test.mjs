@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// FR-009 / FR-016: how the consumer tool reads its two inputs from an indexer.
+// How the consumer tool reads its two inputs from an indexer: the contract's
+// latest public-interface event, and its current state.
 //
 // NOTE: these tests stub `fetch` with the shapes
 // `midnight-indexer/indexer-api/graphql/schema-v4.graphql` (4.4.0-rc.1) defines.
@@ -63,13 +64,13 @@ describe('indexer queries (stubbed transport, not a live round trip)', () => {
     expect(await fetchLatestBundleEvent(URL, ADDRESS)).toBeNull();
   });
 
-  it('reads only the public-interface event: the previous bundle/v1 name, look-alikes and other names are ignored', async () => {
+  it('reads only the public-interface event: look-alikes and other names are ignored', async () => {
     const look = (tail) => Buffer.concat([Buffer.from(PUBLIC_INTERFACE_EVENT, 'latin1'), Buffer.from(tail, 'latin1'), Buffer.alloc(32)]).subarray(0, 32).toString('latin1');
     stubIndexer(() => ({
       data: {
         contractEvents: [
           event(2, 'https://ours.example/', '22'.repeat(32)),
-          event(9, 'https://old.example/', '99'.repeat(32), 'bundle/v1'),                   // the previous name
+          event(9, 'https://other.example/', '99'.repeat(32), 'interface/v1'),              // another name
           event(8, 'https://upper.example/', '88'.repeat(32), PUBLIC_INTERFACE_EVENT.toUpperCase()),
           event(7, 'https://short.example/', '77'.repeat(32), PUBLIC_INTERFACE_EVENT.slice(0, -1)),
           event(6, 'https://tail.example/', '66'.repeat(32), look('\0x')),            // an interior NUL, then more bytes
@@ -82,7 +83,7 @@ describe('indexer queries (stubbed transport, not a live round trip)', () => {
     expect(latest.payload.subarray(32).toString('utf8').replace(/\0+$/, '')).toBe('https://ours.example/');
     expect(latest.supersededIds).toEqual([]);
 
-    stubIndexer(() => ({ data: { contractEvents: [event(9, 'https://old.example/', '99'.repeat(32), 'bundle/v1')] } }));
+    stubIndexer(() => ({ data: { contractEvents: [event(9, 'https://other.example/', '99'.repeat(32), 'interface/v1')] } }));
     expect(await fetchLatestBundleEvent(URL, ADDRESS)).toBeNull();
   });
 
@@ -91,7 +92,7 @@ describe('indexer queries (stubbed transport, not a live round trip)', () => {
     expect((await fetchLatestBundleEvent(URL, ADDRESS)).id).toBe(4);
   });
 
-  it('takes the highest id and lists the superseded ones (FR-016)', async () => {
+  it('takes the highest id and lists the superseded ones', async () => {
     stubIndexer(() => ({
       data: {
         contractEvents: [
@@ -99,7 +100,7 @@ describe('indexer queries (stubbed transport, not a live round trip)', () => {
           event(1, 'https://first.example/', '11'.repeat(32)),
           event(7, 'https://latest.example/', '77'.repeat(32)),
           event(5, 'https://other.example/', '55'.repeat(32), 'schema/v1'),   // not ours
-          event(9, 'https://previous.example/', '99'.repeat(32), 'bundle/v1'),   // the previous name: not read
+          event(9, 'https://another.example/', '99'.repeat(32), 'interface/v1'),   // another name: not read
         ],
       },
     }));
@@ -121,7 +122,7 @@ describe('indexer queries (stubbed transport, not a live round trip)', () => {
     expect(latest.supersededIds).toHaveLength(500);
   });
 
-  it('fetches the state with its block height and transaction hash (FR-014)', async () => {
+  it('fetches the state with its block height and transaction hash', async () => {
     const calls = stubIndexer(() => ({
       data: { contractAction: { address: ADDRESS, state: 'deadbeef', transaction: { hash: 'ff'.repeat(32), block: { height: 4242 } } } },
     }));

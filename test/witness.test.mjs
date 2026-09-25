@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// FR-015 / edge case "circuit takes a witness": a circuit with a private input
-// is not a read. The consumer cannot supply the input, and running it with a
-// stub would answer a different question than the chain did. Both tools refuse.
+// A circuit that takes a witness has a private input, so it is not a read. The
+// consumer cannot supply the input, and running it with a stub would answer a
+// different question than the chain did. Both tools refuse.
 //
 // The fixture exposes `transfer`, which derives the caller's account id from
 // `wit_NonFungibleTokenSK` — so the compiled interface declares a witness.
@@ -12,7 +12,7 @@ import { assembleBundle } from '../src/bundle.mjs';
 import { RefusedError, deployCheck } from '../src/deployer.mjs';
 import { executeCircuit } from '../src/execute.mjs';
 import { simulate } from '../scripts/simulate-deploy.mjs';
-import { BUILD_HINT, COMPACT_HINT, compile, fullOut, hasCompact, integrationOnlyTree, isBuilt, scratch } from './helpers.mjs';
+import { BUILD_HINT, COMPACT_HINT, compile, fullOut, hasCompact, openZeppelinTree, isBuilt, scratch } from './helpers.mjs';
 
 const URL = 'https://example.invalid/nft/';
 
@@ -21,8 +21,8 @@ describe.skipIf(!hasCompact() || !isBuilt())(`circuits with witnesses are refuse
 
   beforeAll(() => {
     s = scratch('witness');
-    const c = integrationOnlyTree(join(s.dir, 'tree'));
-    src = join(c, 'integrations', 'openzeppelin', 'Transferable.Interface.compact');
+    const c = openZeppelinTree(join(s.dir, 'tree'));
+    src = join(c, 'Transferable.Interface.compact');
     writeFileSync(src, [
       'pragma language_version >= 0.23.0;',
       'import CompactStandardLibrary;',

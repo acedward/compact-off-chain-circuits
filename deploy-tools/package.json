@@ -1,0 +1,38 @@
+{
+  "name": "compact-off-chain-circuits-deploy-tools",
+  "private": true,
+  "type": "module",
+  "description": "Deploys the live example of MIP-xxxx: Public Interfaces for Compact Contracts to Midnight Stagenet and publishes its interface bundle; not part of the library. Pins match the toolchain the repository is tested with. testcontainers (via testkit-js) is pinned to undici 7.16.0, the version Node 24 bundles: its undici 8 installs a process-wide fetch dispatcher that Node 24's built-in fetch cannot read, so every indexer response loses its headers.",
+  "dependencies": {
+    "@midnight-ntwrk/compact-js": "2.5.5-rc.8",
+    "@midnight-ntwrk/compact-runtime": "0.19.0",
+    "@midnight-ntwrk/midnight-js-contracts": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-network-id": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-types": "5.0.0-beta.7",
+    "@midnight-ntwrk/testkit-js": "5.0.0-beta.7",
+    "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
+    "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3",
+    "@midnightntwrk/wallet-sdk": "2.0.0-beta.2",
+    "@scure/bip39": "2.0.1",
+    "pino": "10.3.1",
+    "rxjs": "7.8.2"
+  },
+  "overrides": {
+    "@midnight-ntwrk/compact-js": "2.5.5-rc.8",
+    "@midnight-ntwrk/compact-runtime": "0.19.0",
+    "@midnight-ntwrk/platform-js": "3.0.0",
+    "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
+    "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3",
+    "@midnightntwrk/wallet-sdk": "2.0.0-beta.2",
+    "testcontainers": {
+      "undici": "7.16.0"
+    }
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "wrangler": "^4.136.3"
+  }
+}

@@ -6,30 +6,30 @@ This product includes software developed by third parties.
 --------------------------------------------------------------------------------
 OpenZeppelin Compact Contracts
 --------------------------------------------------------------------------------
-Files under `compact/vendor/openzeppelin/` are copied verbatim from
+Files under `compact-examples/openzeppelin/vendor/` are copied verbatim from
 
     https://github.com/OpenZeppelin/compact-contracts
     tag      v0.3.0-alpha.1
     commit   746724f880199197e4cceff95820181866abcecd
     path     contracts/src/
 
-    compact/vendor/openzeppelin/token/FungibleToken.compact     <- contracts/src/token/FungibleToken.compact
-    compact/vendor/openzeppelin/token/NonFungibleToken.compact  <- contracts/src/token/NonFungibleToken.compact
-    compact/vendor/openzeppelin/token/MultiToken.compact        <- contracts/src/token/MultiToken.compact
-    compact/vendor/openzeppelin/utils/Utils.compact             <- contracts/src/utils/Utils.compact
+    compact-examples/openzeppelin/vendor/token/FungibleToken.compact     <- contracts/src/token/FungibleToken.compact
+    compact-examples/openzeppelin/vendor/token/NonFungibleToken.compact  <- contracts/src/token/NonFungibleToken.compact
+    compact-examples/openzeppelin/vendor/token/MultiToken.compact        <- contracts/src/token/MultiToken.compact
+    compact-examples/openzeppelin/vendor/utils/Utils.compact             <- contracts/src/utils/Utils.compact
 
 They are unmodified and remain under their original licence:
 
     SPDX-License-Identifier: MIT
     Copyright (c) 2025 Zeppelin Group Ltd
 
-The `compact/examples/*/Full.compact` contracts are adapted from the OpenZeppelin
+The `compact-examples/*/Full.compact` contracts are adapted from the OpenZeppelin
 mock contracts (`contracts/src/token/test/mocks/Mock*.compact`) at the same commit;
-the only change is the import path, so that they compose the readable integration
-module instead of the upstream module directly. They are also MIT, (c) 2025
-Zeppelin Group Ltd, and carry that notice in their headers.
+the only change is the import path, so that they compose the Readable module
+instead of the upstream module directly. They are also MIT, (c) 2025 Zeppelin
+Group Ltd, and carry that notice in their headers.
 
-`compact/examples/fungible-private/Interface.compact` adapts the six read
+`compact-examples/fungible-private/Interface.compact` adapts the six read
 circuits of `FungibleToken.compact` and the `canonicalize` helper of
 `Utils.compact`, at the same commit: the code is copied with the ledger fields
 renamed and the helpers written inline. It is also MIT, (c) 2025 Zeppelin Group

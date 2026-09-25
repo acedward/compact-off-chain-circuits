@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// SC-006 / US3: an integrator who does not trust the deployer recompiles the
-// published source with the pinned toolchain and gets the shipped verifier keys
-// and the shipped wrapper back, byte for byte. That binds the source and
+// A consumer who does not trust the deployer recompiles the published source
+// with the pinned toolchain and gets the shipped verifier keys and the shipped
+// wrapper back, byte for byte. That binds the source and
 // `index.js` to the deployed circuits, which Level 2 alone cannot do.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -64,7 +64,7 @@ describe.skipIf(!hasCompact() || !isBuilt())(`Level 3 — recompiling the publis
     expect(bad).toContain('contract/index.js');
   });
 
-  it('names a compiler version mismatch as the first suspected cause (US3-AS2)', () => {
+  it('names a compiler version mismatch as the first suspected cause', () => {
     const bundle = bundleFor('nft', 'l3-version');
     const pkgPath = join(bundle.outDir, 'package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));

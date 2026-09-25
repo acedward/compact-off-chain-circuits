@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// SC-001 / SC-008 / US1 / US4: the whole path, for each example — assemble a
-// bundle, deploy-simulate the contract with its verifier keys installed, emit
+// The whole path, for each example: assemble a bundle, deploy-simulate the contract with its verifier keys installed, emit
 // the bundle event, then run the consumer's checks and execute reads.
 //
 // Everything here goes through the public tools: deployCheck() from the deployer
@@ -60,7 +59,7 @@ describe.skipIf(!isBuilt())(`published reads against a simulated deployment (${i
         expect(bundle.circuits.sort()).toEqual([...PUBLISHED[example]].sort());
       });
 
-      it('the emitted event is the public-interface Misc event carrying commitment ++ index URL (US4)', () => {
+      it('the emitted event is the public-interface Misc event carrying commitment ++ index URL', () => {
         expect(sim.eventType).toBe('misc');
         expect(sim.eventName).toBe(PUBLIC_INTERFACE_EVENT);
         expect(sim.eventNameBytes.toString('hex')).toBe(PUBLIC_INTERFACE_EVENT_HEX);
@@ -114,7 +113,7 @@ describe.skipIf(!isBuilt())(`published reads against a simulated deployment (${i
     });
   }
 
-  it('re-reading a later state reflects the new value without a new event or bundle (US1-AS5)', async () => {
+  it('re-reading a later state reflects the new value without a new event or bundle', async () => {
     const url = 'https://example.invalid/nft/';
     const bundle = deployCheck({
       interfaceSrc: interfaceSrc('nft'), interfaceOut: interfaceOut('nft'), fullOut: fullOut('nft'),

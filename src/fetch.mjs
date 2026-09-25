@@ -34,10 +34,10 @@ export const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
  * read circuits, far more than any contract in this repository, so a caller that
  * wants limits can start from them.
  *
- * Measured on the examples (5 to 6 published circuits) at the time of writing:
- * 13 to 17 listed files, a 2 to 3 KB index.json, 86 to 122 KB in total, the largest
- * file a 44 KB generated wrapper, 7 ms to compute the commitment, 17 requests,
- * about 1 s to recompile the interface for Level 3. Each published circuit adds
+ * Measured on the examples (2 to 6 published circuits):
+ * 13 to 17 listed files, a 2 to 3 KB index.json, 79 to 122 KB in total, the largest
+ * file a generated wrapper of up to 50 KB, 7 ms to compute the commitment, 14 to
+ * 18 requests, about 1 s to recompile the interface for Level 3. Each published circuit adds
  * about 10.6 KB of compiled output (a 1,351-byte verifier key, about 7 KB of
  * wrapper, the rest typings and contract description) and one index entry of
  * about 157 bytes that costs about 0.35 ms of group hashing.

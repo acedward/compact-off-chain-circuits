@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// SC-001 / SC-008 / US2-AS1: every circuit a published interface exposes must
-// have a verifier key byte-identical to the one the deployable contract installs
-// on chain. This is the claim the whole design rests on.
+// Every circuit a published interface exposes must have a verifier key
+// byte-identical to the one the deployable contract installs on chain. This is
+// the claim the whole design rests on: Level 2 compares a bundle's keys with the
+// chain's, so an interface that compiled to other keys could never verify.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';

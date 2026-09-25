@@ -1,0 +1,139 @@
+// SPDX-License-Identifier: Apache-2.0
+// OpenZeppelin NonFungibleToken, made readable: an example of MIP-xxxx: Public Interfaces
+// for Compact Contracts.
+//
+// Composition, not a fork: the upstream module under `vendor/` is imported
+// verbatim and every one of its exported circuits is re-exported here unchanged,
+// so upstream updates stay drop-in. The only addition is `publishBundle`, from
+// the standard's module `compact/OffChainInterface.compact`.
+//
+// A contract that imports THIS module instead of the upstream one gains the
+// ability to commit to an off-chain interface bundle, and keeps the upstream
+// ledger layout: this module declares no ledger of its own, so the slots are
+// exactly the upstream module's, in the upstream declaration order. That is the
+// invariant that makes `NonFungibleTokenReadable.Interface.compact` produce
+// verifier keys byte-identical to the deployed contract's.
+//
+// Upstream: OpenZeppelin compact-contracts v0.3.0-alpha.1 @ 746724f8, MIT,
+// (c) 2025 Zeppelin Group Ltd — see NOTICE.
+
+pragma language_version >= 0.23.0;
+
+module NonFungibleTokenReadable {
+  import CompactStandardLibrary;
+  import "./vendor/token/NonFungibleToken" prefix NonFungibleToken_;
+  import "../../compact/OffChainInterface" prefix OffChainInterface_;
+
+  /**
+   * @description Commits this contract to an off-chain interface bundle.
+   * @param {Bytes<256>} payload - commitment (32 bytes) ++ utf8(index.json url) zero padded.
+   * @return {[]} - Empty tuple.
+   */
+  export circuit publishBundle(payload: Bytes<256>): [] {
+    return OffChainInterface_publishBundle(payload);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Upstream NonFungibleToken exports, re-exported verbatim (25 circuits).
+  // ---------------------------------------------------------------------------
+
+  export circuit initialize(name_: Opaque<"string">, symbol_: Opaque<"string">): [] {
+    return NonFungibleToken_initialize(name_, symbol_);
+  }
+
+  export circuit balanceOf(owner: Either<Bytes<32>, ContractAddress>): Uint<128> {
+    return NonFungibleToken_balanceOf(owner);
+  }
+
+  export circuit ownerOf(tokenId: Uint<128>): Either<Bytes<32>, ContractAddress> {
+    return NonFungibleToken_ownerOf(tokenId);
+  }
+
+  export circuit name(): Opaque<"string"> {
+    return NonFungibleToken_name();
+  }
+
+  export circuit symbol(): Opaque<"string"> {
+    return NonFungibleToken_symbol();
+  }
+
+  export circuit tokenURI(tokenId: Uint<128>): Opaque<"string"> {
+    return NonFungibleToken_tokenURI(tokenId);
+  }
+
+  export circuit _setTokenURI(tokenId: Uint<128>, tokenURI: Opaque<"string">): [] {
+    return NonFungibleToken__setTokenURI(tokenId, tokenURI);
+  }
+
+  export circuit approve(to: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>): [] {
+    return NonFungibleToken_approve(to, tokenId);
+  }
+
+  export circuit getApproved(tokenId: Uint<128>): Either<Bytes<32>, ContractAddress> {
+    return NonFungibleToken_getApproved(tokenId);
+  }
+
+  export circuit setApprovalForAll(operator: Either<Bytes<32>, ContractAddress>, approved: Boolean): [] {
+    return NonFungibleToken_setApprovalForAll(operator, approved);
+  }
+
+  export circuit isApprovedForAll(owner: Either<Bytes<32>, ContractAddress>, operator: Either<Bytes<32>, ContractAddress>): Boolean {
+    return NonFungibleToken_isApprovedForAll(owner, operator);
+  }
+
+  export circuit transferFrom(fromAddress: Either<Bytes<32>, ContractAddress>, to: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>): [] {
+    return NonFungibleToken_transferFrom(fromAddress, to, tokenId);
+  }
+
+  export circuit _unsafeTransferFrom(fromAddress: Either<Bytes<32>, ContractAddress>, to: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>): [] {
+    return NonFungibleToken__unsafeTransferFrom(fromAddress, to, tokenId);
+  }
+
+  export circuit _ownerOf(tokenId: Uint<128>): Either<Bytes<32>, ContractAddress> {
+    return NonFungibleToken__ownerOf(tokenId);
+  }
+
+  export circuit _getApproved(tokenId: Uint<128>): Either<Bytes<32>, ContractAddress> {
+    return NonFungibleToken__getApproved(tokenId);
+  }
+
+  export circuit _isAuthorized(owner: Either<Bytes<32>, ContractAddress>, spender: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>): Boolean {
+    return NonFungibleToken__isAuthorized(owner, spender, tokenId);
+  }
+
+  export circuit _checkAuthorized(owner: Either<Bytes<32>, ContractAddress>, spender: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>): [] {
+    return NonFungibleToken__checkAuthorized(owner, spender, tokenId);
+  }
+
+  export circuit _mint(to: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>): [] {
+    return NonFungibleToken__mint(to, tokenId);
+  }
+
+  export circuit _unsafeMint(to: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>): [] {
+    return NonFungibleToken__unsafeMint(to, tokenId);
+  }
+
+  export circuit _burn(tokenId: Uint<128>): [] {
+    return NonFungibleToken__burn(tokenId);
+  }
+
+  export circuit _transfer(fromAddress: Either<Bytes<32>, ContractAddress>, to: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>): [] {
+    return NonFungibleToken__transfer(fromAddress, to, tokenId);
+  }
+
+  export circuit _unsafeTransfer(fromAddress: Either<Bytes<32>, ContractAddress>, to: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>): [] {
+    return NonFungibleToken__unsafeTransfer(fromAddress, to, tokenId);
+  }
+
+  export circuit _approve(to: Either<Bytes<32>, ContractAddress>, tokenId: Uint<128>, auth: Either<Bytes<32>, ContractAddress>): [] {
+    return NonFungibleToken__approve(to, tokenId, auth);
+  }
+
+  export circuit _setApprovalForAll(owner: Either<Bytes<32>, ContractAddress>, operator: Either<Bytes<32>, ContractAddress>, approved: Boolean): [] {
+    return NonFungibleToken__setApprovalForAll(owner, operator, approved);
+  }
+
+  export circuit _requireOwned(tokenId: Uint<128>): Either<Bytes<32>, ContractAddress> {
+    return NonFungibleToken__requireOwned(tokenId);
+  }
+}

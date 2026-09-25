@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// SC-004: the on-chain footprint per published bundle version, and the size of
-// the bundle itself.
+// The on-chain footprint per published bundle version, and the size of the
+// bundle itself.
 //
 // On chain the numbers are exact: one `Misc` event, 32 bytes of name plus 256
 // bytes of payload.
 //
-// Off chain, SC-004's "<= 64 KB for one exposed circuit" is asserted against the
-// compiled artifacts, which is what that figure was measured on. A whole
-// OpenZeppelin bundle is larger, because it also carries the published source —
+// Off chain, "<= 64 KB for one exposed circuit" is asserted against the
+// compiled artifacts, which is what that figure measures. A whole OpenZeppelin
+// bundle is larger, because it also carries the published source —
 // `NonFungibleToken.compact` alone is 36 KB of mostly documentation. Those
 // totals are asserted against generous ceilings and printed, so a regression
 // shows up without pinning an arbitrary number. The bundle carries no copy of
@@ -19,7 +19,7 @@ import { assembleBundle } from '../src/bundle.mjs';
 import { deployCheck } from '../src/deployer.mjs';
 import { walk } from '../src/hash.mjs';
 import { simulate } from '../scripts/simulate-deploy.mjs';
-import { BUILD_HINT, COMPACT_HINT, EXAMPLES, compile, fullOut, hasCompact, integrationOnlyTree, interfaceOut, interfaceSrc, isBuilt, scratch } from './helpers.mjs';
+import { BUILD_HINT, COMPACT_HINT, EXAMPLES, compile, fullOut, hasCompact, openZeppelinTree, interfaceOut, interfaceSrc, isBuilt, scratch } from './helpers.mjs';
 import { writeFileSync } from 'node:fs';
 
 const KB = 1024;
@@ -72,8 +72,8 @@ describe.skipIf(!isBuilt())(`footprint (${isBuilt() ? 'built' : BUILD_HINT})`, (
   });
 
   it.skipIf(!hasCompact())(`a bundle exposing one circuit keeps its compiled artifacts under 64 KB (${hasCompact() ? 'ok' : COMPACT_HINT})`, () => {
-    const c = integrationOnlyTree(join(s.dir, 'one'));
-    const src = join(c, 'integrations', 'openzeppelin', 'One.Interface.compact');
+    const c = openZeppelinTree(join(s.dir, 'one'));
+    const src = join(c, 'One.Interface.compact');
     writeFileSync(src, [
       'pragma language_version >= 0.23.0;',
       'import CompactStandardLibrary;',

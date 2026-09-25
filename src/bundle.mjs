@@ -231,7 +231,7 @@ export const EXAMPLES = {
   fungible: { module: 'FungibleTokenReadable' },
   nft: { module: 'NonFungibleTokenReadable' },
   multi: { module: 'MultiTokenReadable' },
-  'fungible-private': { source: ['examples', 'fungible-private', 'Interface.compact'], deployed: 'fungible' },
+  'fungible-private': { source: ['fungible-private', 'Interface.compact'], deployed: 'fungible' },
 };
 
 /** Resolve `--example <name>` against this repository's layout. */
@@ -241,11 +241,11 @@ export function exampleLayout(name, repoRoot = dirname(HERE)) {
   const deployed = ex.deployed ?? name;
   return {
     interfaceSrc: ex.source
-      ? join(repoRoot, 'compact', ...ex.source)
-      : join(repoRoot, 'compact', 'integrations', 'openzeppelin', `${ex.module}.Interface.compact`),
+      ? join(repoRoot, 'compact-examples', ...ex.source)
+      : join(repoRoot, 'compact-examples', 'openzeppelin', `${ex.module}.Interface.compact`),
     interfaceOut: join(repoRoot, 'build', name, 'interface'),
     fullOut: join(repoRoot, 'build', deployed, 'full'),
-    fullSrc: join(repoRoot, 'compact', 'examples', deployed, 'Full.compact'),
+    fullSrc: join(repoRoot, 'compact-examples', deployed, 'Full.compact'),
   };
 }
 

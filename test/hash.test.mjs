@@ -24,10 +24,10 @@ const shuffle = (xs) => { const a = [...xs]; for (let i = a.length - 1; i > 0; i
 const ENTRIES = [
   'README.md', 'package.json', 'out/compiler/contract-info.json', 'out/contract/index.d.ts', 'out/contract/index.js',
   'out/contract/package.json', 'out/keys/balanceOf.verifier', 'out/keys/name.verifier', 'out/keys/ownerOf.verifier',
-  'out/keys/symbol.verifier', 'out/keys/tokenURI.verifier', 'src/OffChainInterface.compact',
-  'src/integrations/openzeppelin/NonFungibleTokenReadable.Interface.compact',
-  'src/integrations/openzeppelin/NonFungibleTokenReadable.compact',
-  'src/vendor/openzeppelin/token/NonFungibleToken.compact', 'src/vendor/openzeppelin/utils/Utils.compact',
+  'out/keys/symbol.verifier', 'out/keys/tokenURI.verifier', 'src/compact/OffChainInterface.compact',
+  'src/compact-examples/openzeppelin/NonFungibleTokenReadable.Interface.compact',
+  'src/compact-examples/openzeppelin/NonFungibleTokenReadable.compact',
+  'src/compact-examples/openzeppelin/vendor/token/NonFungibleToken.compact', 'src/compact-examples/openzeppelin/vendor/utils/Utils.compact',
 ].map((p) => [p, sha(`contents of ${p}`)]);
 
 describe('entry point: Zcash Sapling GroupHash on JubJub', () => {
@@ -215,7 +215,7 @@ describe('index.json', () => {
     ['wrong bundle tag', mutate((i) => { i.bundle = 'v2'; }), /"bundle"/],
     ['wrong commitment tag', mutate((i) => { i.commitment = 'ecmh-jubjub'; }), /"commitment"/],
     ['a runtime field (not part of this format)', mutate((i) => { i.runtime = '0.19.0'; }), /unknown field.*runtime/],
-    ['no hash (an index written before the hash was required)', mutate((i) => { delete i.hash; }), /"hash".*64 lowercase hex/],
+    ['no hash', mutate((i) => { delete i.hash; }), /"hash".*64 lowercase hex/],
     ['an uppercase hash', mutate((i) => { i.hash = i.hash.toUpperCase(); }), /"hash".*64 lowercase hex/],
     ['a short hash', mutate((i) => { i.hash = i.hash.slice(2); }), /"hash".*64 lowercase hex/],
     ['a 0x-prefixed hash', mutate((i) => { i.hash = `0x${i.hash.slice(2)}`; }), /"hash".*64 lowercase hex/],

@@ -90,18 +90,18 @@ describe('the writer', () => {
   });
 });
 
-describe('an index written before D32 is refused', () => {
-  const history = join(REPO, 'live', 'stagenet', 'site', 'erc20', 'index.json');
-
-  it('the two format tags alone no longer make a valid index', () => {
+describe('an index without hash and compiler is refused', () => {
+  it('the two format tags alone do not make a valid index', () => {
     expect(() => validateIndex({ ...INDEX_FORMAT, files: [] })).toThrow(/"hash"/);
   });
 
-  it.skipIf(!existsSync(history))('the first live bundle\'s index.json (history, left as it was published) fails validation on the missing hash', () => {
-    const old = readJson(history);
-    expect(Object.keys(old)).toEqual(['bundle', 'commitment', 'files']);
-    expect(() => validateIndex(old)).toThrow(IndexError);
-    expect(() => validateIndex(old)).toThrow(/"hash"/);
+  it('an index with valid entries but no hash or compiler fails validation on the missing hash', () => {
+    const entry = (path, text) => ({ path, sha256: sha(text), size: Buffer.byteLength(text) });
+    const partial = { ...INDEX_FORMAT, files: [entry('README.md', 'readme'), entry('package.json', '{}'), entry('src/Interface.compact', 'source')] };
+    expect(Object.keys(partial)).toEqual(['bundle', 'commitment', 'files']);
+    expect(indexCommitment(partial)).toHaveLength(32);     // its entries are well formed
+    expect(() => validateIndex(partial)).toThrow(IndexError);
+    expect(() => validateIndex(partial)).toThrow(/"hash"/);
   });
 });
 
@@ -285,12 +285,11 @@ describe.skipIf(!hasCompact() || !isBuilt())(`the genuine bundle of every exampl
   }
 });
 
-describe('the live private bundle (live/stagenet/site/public-interface/erc20-private)', () => {
-  const site = join(REPO, 'live', 'stagenet', 'site', 'public-interface', 'erc20-private');
-  const deployment = join(REPO, 'live', 'stagenet', 'deployment.json');
-  const present = existsSync(join(site, 'index.json')) && existsSync(deployment);
+describe('the live private bundle (deploy-tools/site/public-interface/erc20-private)', () => {
+  const site = join(REPO, 'deploy-tools', 'site', 'public-interface', 'erc20-private');
+  const deployment = join(REPO, 'deploy-tools', 'deployment.json');
 
-  it.skipIf(!present)('its index.json carries hash and compiler, and still gives the commitment the contract published', async () => {
+  it('its index.json carries hash and compiler, and still gives the commitment the contract published', async () => {
     const rec = readJson(deployment).privateInterface.bundle;
     const published = Buffer.from(rec.payload, 'hex').subarray(0, 32);
     expect(published.toString('hex')).toBe('4814bf93c6c0a6c81c7839f9be72c80365c2a4179d58171e7acd40906be30891');

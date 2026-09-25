@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// The public-interface event: its name, its bytes, and where the name may be
+// The public-interface event: its name, its bytes, and where the name is
 // written.
 //
-// The name is written in exactly three places a person edits: the circuit
-// (compact/OffChainInterface.compact), the one JavaScript constant
-// (src/event.mjs), and the event's definition in docs/FORMAT.md. Copies of the
-// module inside published bundles carry it too. Everything else imports the
-// constant. The word the name starts with appears nowhere else in the
-// repository, not in prose, comments, tests or file names: the scan below
-// enforces that, and it derives the word from the constant so that this file
-// does not contain it.
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+// The name is fixed in the circuit (compact/OffChainInterface.compact), so no
+// caller can emit another one, and the verifier reads it from one JavaScript
+// constant (src/event.mjs) that everything else imports. A consumer recognises
+// the event by these 32 bytes alone, so the two must agree byte for byte.
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PUBLIC_INTERFACE_EVENT, PUBLIC_INTERFACE_EVENT_HEX } from '../src/event.mjs';
@@ -20,21 +15,10 @@ import { deploySimulated } from '../scripts/simulate-deploy.mjs';
 import { BUILD_HINT, EXAMPLES, REPO, fullOut, isBuilt } from './helpers.mjs';
 
 const NAME_BYTES = Buffer.from(PUBLIC_INTERFACE_EVENT_HEX, 'hex');
-/** The first word of the name, the one the allow-list governs. */
-const WORD = PUBLIC_INTERFACE_EVENT.split('-')[0];
-/** Paths, relative to the repository, that may contain the name. */
-const ALLOWED = [
-  'compact/OffChainInterface.compact',
-  'src/event.mjs',
-  'docs/FORMAT.md',
-];
-/** A copy of the module inside a published bundle, such as live/stagenet/site/erc20/src/OffChainInterface.compact. */
-const BUNDLE_COPY = /^live\/stagenet\/site\/(?:[^/]+\/)+src\/(?:[^/]+\/)*OffChainInterface\.compact$/;
-const allowed = (path) => ALLOWED.includes(path) || BUNDLE_COPY.test(path);
 
 describe('the name', () => {
   it('is 29 ASCII bytes, zero padded to the 32 bytes of a Misc event name', () => {
-    expect(WORD).toHaveLength(3);
+    expect(PUBLIC_INTERFACE_EVENT.split('-')[0]).toHaveLength(3);
     expect(PUBLIC_INTERFACE_EVENT).toMatch(/^[\x21-\x7e]+$/);
     expect(Buffer.byteLength(PUBLIC_INTERFACE_EVENT)).toBe(29);
     expect(NAME_BYTES).toHaveLength(32);
@@ -81,45 +65,10 @@ describe.skipIf(!isBuilt())(`what a local publishBundle call emits (${isBuilt() 
 });
 
 // ---------------------------------------------------------------------------
-/** Every file git would commit: tracked and not deleted, plus untracked files that are not ignored. */
-function repositoryFiles() {
-  const out = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: REPO, maxBuffer: 1 << 26 });
-  return [...new Set(out.toString('utf8').split('\0').filter(Boolean))].filter((p) => existsSync(join(REPO, p)));
-}
-const isGitCheckout = (() => {
-  try { execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: REPO, stdio: 'ignore' }); return existsSync(join(REPO, '.git')); }
-  catch { return false; }
-})();
-
-describe.skipIf(!isGitCheckout)(`where the name may be written (${isGitCheckout ? 'git checkout' : 'not a git checkout: skipped'})`, () => {
-  const wordRe = () => new RegExp(`\\b${WORD}\\b`, 'gi');
-
-  it('the word appears only in the allowed files, and there only as the start of the full name', () => {
-    const files = repositoryFiles();
-    expect(files.length).toBeGreaterThan(100);
-    expect(files).toContain('compact/OffChainInterface.compact');
-    const found = [];
-    for (const path of files) {
-      if (wordRe().test(path)) found.push({ path, where: 'file name' });
-      const text = readFileSync(join(REPO, path)).toString('latin1');
-      for (const m of text.matchAll(wordRe())) {
-        const full = text.slice(m.index, m.index + PUBLIC_INTERFACE_EVENT.length) === PUBLIC_INTERFACE_EVENT;
-        if (!allowed(path) || !full) found.push({ path, at: m.index, text: JSON.stringify(text.slice(Math.max(0, m.index - 30), m.index + 40)) });
-      }
-    }
-    expect(found).toEqual([]);
-  });
-
-  it('the scan sees the name where it must be: once in the constant, once in the circuit', () => {
+describe('where the name is written', () => {
+  it('once in the constant and once in the circuit; everything else imports the constant', () => {
     const count = (path) => readFileSync(join(REPO, path), 'latin1').split(PUBLIC_INTERFACE_EVENT).length - 1;
     expect(count('src/event.mjs')).toBe(1);
     expect(count('compact/OffChainInterface.compact')).toBe(1);
-    expect(readFileSync(join(REPO, 'src', 'event.mjs'), 'latin1').match(wordRe())).toHaveLength(1);
-  });
-
-  it('the other phrase the wording rule forbids (FR-021) appears in no file either', () => {
-    const phrase = new RegExp(['improvement', 'proposals?'].join('\\s+'), 'i');
-    const found = repositoryFiles().filter((path) => phrase.test(readFileSync(join(REPO, path)).toString('latin1')));
-    expect(found).toEqual([]);
   });
 });

@@ -306,7 +306,7 @@ describe('F9: Level 3 compiles only a source listed inside the bundle', () => {
 
 describe('F4: the live bundle step skips a bundle already recorded', () => {
   // Static check: the steps need the wallet and are never run by the tests.
-  const src = readFileSync(join(REPO, 'live', 'stagenet', 'deploy.mjs'), 'utf8');
+  const src = readFileSync(join(REPO, 'deploy-tools', 'deploy.mjs'), 'utf8');
   const body = (fn) => {
     const start = src.indexOf(`async function ${fn}(`);
     expect(start).toBeGreaterThan(-1);

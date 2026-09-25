@@ -6,10 +6,10 @@ tmp/
 .DS_Store
 .env
 .env.*
-!.env.example
-live/stagenet/.contract/
-live/stagenet/midnight-level-db/
-live/stagenet/*.log
-live/stagenet/contracts/managed/
-live/stagenet/logs/
-live/stagenet/.wrangler/
+midnight-level-db/
+deploy-tools/.contract/
+deploy-tools/*.log
+deploy-tools/contracts/managed/
+deploy-tools/logs/
+deploy-tools/.wrangler/
+deploy-tools/deployment.json.tmp.*

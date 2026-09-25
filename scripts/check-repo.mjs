@@ -67,13 +67,6 @@ const TERMS = new RegExp([
   ...RETIRED_HEX.map((h) => `(?<![0-9a-f])${h}(?![0-9a-f])`),
 ].join('|'), 'gi');
 
-/**
- * Files whose retired terms are reported but do not fail the check, because
- * they are about to be replaced: README.md, until it is rewritten over this
- * layout. Keep this list empty otherwise.
- */
-export const PENDING = ['README.md'];
-
 /** Paths not searched for retired terms. */
 const UNSEARCHED = [
   /(^|\/)package-lock\.json$/,
@@ -99,30 +92,25 @@ function siteFiles(root) {
   }
 }
 
-/**
- * `{ files, layout: [{ path, why }], terms: [{ path, line, term }], pending }`
- * for the repository at `root`; `pending` holds the terms found in PENDING files.
- */
+/** `{ files, layout: [{ path, why }], terms: [{ path, line, term }] }` for the repository at `root`. */
 export function checkRepo(root = ROOT) {
   const files = repositoryFiles(root);
   const site = siteFiles(root);
   const layout = [];
   const terms = [];
-  const pending = [];
   for (const path of files) {
     const rule = LAYOUT.find(([re]) => re.test(path));
     if (!rule) layout.push({ path, why: 'outside the repository layout' });
     else if (path.startsWith(SITE) && !site.has(path.slice(SITE.length))) layout.push({ path, why: 'in the hosted copy of the live bundle, but not listed in its index.json' });
 
     if (UNSEARCHED.some((re) => re.test(path))) continue;
-    const found = PENDING.includes(path) ? pending : terms;
-    for (const m of path.matchAll(TERMS)) found.push({ path, line: 0, term: m[0] });
+    for (const m of path.matchAll(TERMS)) terms.push({ path, line: 0, term: m[0] });
     const text = readFileSync(join(root, path)).toString('latin1');
     for (const m of text.matchAll(TERMS)) {
-      found.push({ path, line: text.slice(0, m.index).split('\n').length, term: m[0] });
+      terms.push({ path, line: text.slice(0, m.index).split('\n').length, term: m[0] });
     }
   }
-  return { files: files.length, layout, terms, pending };
+  return { files: files.length, layout, terms };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
@@ -133,11 +121,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.error('usage: check-repo.mjs [--root <dir>]');
     process.exit(2);
   }
-  const { files, layout, terms, pending } = checkRepo(root);
+  const { files, layout, terms } = checkRepo(root);
   const where = (t) => `${t.path}${t.line ? `:${t.line}` : ' (its name)'}: ${JSON.stringify(t.term)}`;
   for (const f of layout) console.log(`LAYOUT  ${f.path}: ${f.why}`);
   for (const t of terms) console.log(`RETIRED ${where(t)}`);
-  for (const t of pending) console.log(`PENDING ${where(t)} (reported only: the file is listed in PENDING)`);
-  console.log(`${files} files checked: ${layout.length} outside the layout, ${terms.length} retired terms${pending.length ? `, ${pending.length} in pending files` : ''}`);
+  console.log(`${files} files checked: ${layout.length} outside the layout, ${terms.length} retired terms`);
   process.exit(layout.length || terms.length ? 1 : 0);
 }

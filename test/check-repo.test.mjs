@@ -10,7 +10,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, writeFileSync } from 'no
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PENDING, RETIRED, RETIRED_HEX, checkRepo, repositoryFiles } from '../scripts/check-repo.mjs';
+import { RETIRED, RETIRED_HEX, checkRepo, repositoryFiles } from '../scripts/check-repo.mjs';
 import { REPO, scratch } from './helpers.mjs';
 
 const run = promisify(execFile);
@@ -43,7 +43,6 @@ describe.skipIf(!isGitCheckout)(`check-repo (${isGitCheckout ? 'git checkout' : 
     expect(r.files).toBeGreaterThan(50);
     expect(r.layout).toEqual([]);
     expect(r.terms).toEqual([]);
-    expect(r.pending.every((t) => PENDING.includes(t.path))).toBe(true);
     const c = await cli(copy('clean'));
     expect(c.code).toBe(0);
     expect(c.stdout).toMatch(/ 0 outside the layout, 0 retired terms/);

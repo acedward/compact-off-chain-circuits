@@ -23,7 +23,7 @@ const SITE = 'deploy-tools/site/public-interface/erc20-private/';
 
 /** Every path the repository may hold, with what it is for. */
 export const LAYOUT = [
-  [/^(README\.md|LICENSE|NOTICE|package\.json|package-lock\.json|vitest\.config\.mjs|\.gitignore)$/, 'the top-level files'],
+  [/^(README\.md|MIP-SPEC-DRAFT\.md|LICENSE|NOTICE|package\.json|package-lock\.json|vitest\.config\.mjs|\.gitignore)$/, 'the top-level files'],
   [/^compact\/(OffChainInterface|Interface\.template)\.compact$/, 'what the standard defines in Compact'],
   [/^compact-examples\/openzeppelin\/vendor\/(token|utils)\/[A-Za-z]+\.compact$/, 'the vendored OpenZeppelin modules'],
   [/^compact-examples\/openzeppelin\/[A-Za-z]+Readable(\.Interface)?\.compact$/, 'the Readable wrappers and their open interfaces'],

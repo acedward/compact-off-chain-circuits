@@ -138,7 +138,7 @@ node src/verify.mjs --indexer https://<indexer>/api/v4/graphql --address <contra
 2. **Fetch the bundle.** Fetch `index.json` from that URL, then only the files it lists, into a private folder. `--bundle-url <url>` fetches it from elsewhere, and `--bundle <dir>` uses a local copy.
 3. **Verify it**, level by level. `verify` stops at the first failure.
    - **Level 1:** the files are the ones the contract committed to.
-   - **Level 2:** the bundle's verifier keys are the deployed contract's.
+   - **Level 2:** the bundle's `.verifier` files are the verifier keys the contract stores on chain.
    - **Level 3:** rebuilding the published source produces those keys and the exact code that runs.
 
    `--level 2`, the default, runs Levels 1 and 2 and needs no compiler. `--level 3` runs all three and needs `compact`.
@@ -238,10 +238,13 @@ commitment    = C encoded in 32 bytes: y little-endian, top bit = x mod 2
   2. The commitment recomputed from the entries equals both.
   3. Each listed file matches its sha256 and size.
   4. `compiler` matches the listed `package.json`, version and flags.
-- **Level 2:**
-  1. Every shipped key equals the key the contract state stores under that entry point.
-  2. Every circuit the bundle publishes (`contract-info.json`) that has an entry point on chain ships its key.
-  3. The key hashes the compiler wrote into `index.js`, its `expectedVk` table, match the shipped keys. The file is read as text, not run.
+- **Level 2:** the bundle's `.verifier` files are the verifier keys the contract stores on chain. It needs no compiler and runs no bundle code. A client:
+  1. reads the contract's current state, from an indexer with `contractAction(address) { state }`, and deserializes it as a `ContractState` (`@midnight-ntwrk/compact-runtime`);
+  2. for each `out/keys/<circuit>.verifier` in the bundle, takes the key the state stores under the entry point `<circuit>`, `state.operation("<circuit>").verifierKey`, and compares the two byte for byte. A key that differs fails, and so does a key for an entry point the contract does not have;
+  3. checks that the bundle ships at least one key, and that every circuit it publishes (`out/compiler/contract-info.json`) that has an entry point on chain ships its key;
+  4. reads the `expectedVk` table the compiler wrote into `out/contract/index.js`, as text, and checks that it gives the sha256 of each shipped key. This catches keys and a wrapper taken from two different compilations. A wrapper with no table, from a compiler that writes none, skips this step.
+
+  Passing proves that each published circuit is the circuit the chain verifies under that name. It does not prove that the shipped source or `index.js` compile to those keys: until Level 3, the code that runs is the publisher's.
 - **Level 3:** recompiling the interface source that `package.json` names, a listed file, with the installed compiler:
   1. runs without `COMPACT_PATH`, and reads only files inside the bundle that the index lists. This is checked from the compiler's `--trace-search` output. When a listed source imports a file, a missing or unrecognised trace fails Level 3.
   2. reproduces exactly the shipped keys, `index.js` and `contract-info.json`, and no key the bundle leaves out.

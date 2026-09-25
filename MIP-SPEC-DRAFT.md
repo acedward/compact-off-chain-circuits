@@ -39,7 +39,7 @@ License: Apache-2.0
 <!-- About 200 words. -->
 
 - Verifiable off-chain reads: a contract publishes a small bundle holding its read circuits; anyone runs them locally against current state, with no transaction and no proof.
-- One MIP-0002 `Misc` event commits the contract to the bundle: a 32-byte commitment and the URL of its `index.json`. One interface per contract; the newest event wins.
+- One MIP-0002 `Misc` event commits the contract to the bundle: a 32-byte commitment and the URI of its `index.json`. One interface per contract; the newest event wins.
 - Three levels: the files are the committed ones (Level 1); the `.verifier` files are the on-chain keys (Level 2); the source rebuilds to them (Level 3).
 - Open or private interfaces; both compile to the deployed keys.
 - Kilobytes, not the full compiled output: verifier keys only, never prover keys or ZKIR.
@@ -68,8 +68,8 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be interpreted a
 
 ### Scope
 
-- Normative: [1] to [10].
-- Informative: the appendices and the reference implementation.
+- Normative: [1] to [10], and the test vectors of Appendix B.
+- Informative: the other appendices and the reference implementation.
 
 ### Terminology
 
@@ -78,6 +78,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be interpreted a
 ### 1. The event
 
 - `publishBundle(payload: Bytes<256>)` emits `Misc { name: pad(32, "mip-xxxx:public-interface[v1]"), payload }`.
+- The name keeps `mip-xxxx` until the MIP editors assign a number.
 - The name's exact bytes; consumers ignore any other name or version.
 - Naming follows MIP-0018: lowercase, colon namespace, bracketed version.
 - The emitting address is the provenance; the newest event wins.
@@ -86,14 +87,15 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be interpreted a
 ### 2. Payload layout
 
 - Bytes 0 to 31: the commitment.
-- Bytes 32 to 255: the UTF-8 URL of `index.json`, zero padded (224 bytes at most).
+- Bytes 32 to 255: the UTF-8 URI of `index.json`, zero padded (224 bytes at most).
+- `https` is the baseline every consumer fetches. A publisher MAY opt in to a content-addressed store by using its URI, for example `ipfs://`; a consumer that cannot fetch that scheme gets the files another way (a gateway, a local copy). The commitment checks the content whatever its source.
 - The caller assembles the payload, because Compact has no byte concatenation.
 
 ### 3. The bundle
 
 - The interface source and its imports (`src/`), one `out/keys/<circuit>.verifier` per published circuit, `out/contract/index.js` and its typings, `contract-info.json`, `package.json` (compiler, language, runtime, interface path, flags), and a README.
 - Never prover keys or ZKIR.
-- Paths resolve relative to the index URL; the folder is hosted as is.
+- Paths resolve relative to the index URI; the folder is hosted as is.
 
 ### 4. index.json
 
@@ -148,13 +150,17 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be interpreted a
 
 - Why an event, not contract state: no ledger slot, so existing keys stay unchanged, and existing contracts can adopt it later.
 - Why one interface per contract, with the newest event winning.
-- Why a commitment plus a URL, not the content on chain.
+- Why a commitment plus a URI, not the content on chain.
 - Why a JubJub multiset group hash: order-independent, binding, and not Poseidon, which a hard fork may change.
 - Why `hash` and `compiler` in `index.json`.
 - Why three levels: Level 2 needs no compiler; Level 3 is a reproducible build.
 - Why verifier keys only; why private interfaces; why the JS wrapper for now.
 - Why refuse witness and pure circuits; why a separate process.
-- Alternatives considered (short).
+- Alternatives considered, all rejected:
+  - **Data on the ledger** (the interface in contract state): a bundle (79 to 122 KB) is more than one block may write (50,000 bytes on Stagenet), and every byte stays in state.
+  - **Data in events** (the files themselves in `Misc` payloads): at 256 bytes per payload, a bundle takes hundreds of events, each metered, for consumers to reassemble.
+  - **A centralized off-chain registry**: a party everyone must trust and keep online, and a single point of censorship. The on-chain commitment makes any host acceptable instead.
+  - **A data-availability layer as a requirement**: every consumer would depend on that layer. A publisher may still opt in by pointing the URI at a content-addressed store such as IPFS [2].
 
 ## Path to Active
 
@@ -179,7 +185,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be interpreted a
 - No protocol, compiler or indexer change: a convention over MIP-0002 `Misc`.
 - Contracts without `publishBundle` are unaffected; ledger v9 contracts can add it through their maintenance authority.
 - Events need indexer 4.4.0 or later (beta API); otherwise the payload and state can be supplied directly.
-- Draft events named `mip-xxxx` are not events of the numbered MIP.
+- Draft events named `mip-xxxx` are not events of the numbered MIP. The reference deployment emits the draft name, and is redone once a number is assigned.
 
 ## Security Considerations
 
@@ -211,10 +217,15 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be interpreted a
 
 ### Level 3 trusts the installed compiler
 
+### Proving cost
+
+- A pointer to the measured cost in Appendix C, as MIP-0018 does.
+
 ## Implementation
 
 ### Components
 
+- Reference implementation: https://github.com/acedward/compact-off-chain-circuits (Apache-2.0), pinned to a commit at submission.
 - The module, the template, the deployer check, the verifier, and the OpenZeppelin examples.
 
 ### Reference deployment (Stagenet)
@@ -252,6 +263,10 @@ Submission requires agreement to the Midnight Foundation Contributor License Agr
 
 ## Appendix B: Commitment test vectors
 
-## Appendix C: Sizing guidance (informative)
+## Appendix C: Circuit cost (informative)
 
-## Appendix D: Mapping to MPS-0039's goals (informative)
+- The circuit rows of `publishBundle`, measured as MIP-0018 measures its shapes: compiled with Compact 0.34.0 and measured with its bundled `zkir-v3 mock-compile`.
+
+## Appendix D: Sizing guidance (informative)
+
+## Appendix E: Mapping to MPS-0039's goals (informative)

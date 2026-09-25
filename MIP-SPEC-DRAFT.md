@@ -32,16 +32,18 @@ License: Apache-2.0
 
 This MIP defines how a Midnight contract publishes a discoverable Compact
 interface for local public-state reads. A MIP-0002 event commits to a bundle of
-source, verifier keys, generated code, and compiler metadata. Consumers can
-check the committed bytes (Level 1), compare named verifier keys with installed
-contract operations (Level 2), and reproduce executable artifacts with a
-trusted compiler (Level 3).
+source, verifier keys, generated code, and compiler metadata. Level 1
+establishes that the retrieved path/content set matches that commitment. Level
+2 establishes that every published key equals the key of its same-named
+operation in the identified contract state. Level 3 establishes that the
+published source, compiled with the trusted toolchain, reproduces the shipped
+keys, code, typings, and compiler metadata byte-for-byte.
 
-Artifact verification, read eligibility, and host confinement are separate
-properties. A verified bundle can contain code that is not an eligible read,
-and verified code is not thereby safe to execute with ambient host authority.
-A successful local read produces neither a proof nor a transaction and is
-meaningful only for the identified state, toolchain, and execution profile.
+A successful conforming read returns an exactly typed result from the selected
+public state and exact public arguments after read eligibility is established
+and host access and resource limits are enforced. Its report identifies the
+state, tools, completed checks, and remaining assumptions. The local read needs
+no proof service, proof, or transaction.
 
 ## Motivation
 
@@ -427,9 +429,10 @@ A Level 1 consumer MUST:
 5. confirm that all mandatory artifact classes are present and that
    `out/contract/package.json` has the exact v1 module-marker bytes.
 
-Level 1 establishes integrity relative to the selected event commitment. It
-does not establish publisher authority, availability, freshness, key equality,
-safe execution, or an authentic state/event provider.
+Level 1 establishes exact path, content, and profile integrity relative to the
+selected event commitment. Its report scopes that conclusion to the selected
+event and provider; separate checks establish installed-key equality, source
+reproduction, read eligibility, and confinement.
 
 #### Level 2 — Installed verifier keys
 
@@ -474,10 +477,11 @@ mismatching row fails. This table is only an internal consistency check: a
 publisher can modify a wrapper while retaining genuine keys and recompute the
 bundle commitment.
 
-Level 2 establishes named key equality at the identified state. It does not
-authenticate wrapper behavior, source, original field names, eligibility, or
-the state provider. Executing after only Level 2 requires explicit trust in the
-publisher's committed wrapper and MUST be reported as `publisher-trusted code`.
+Level 2 establishes that every shipped key equals the same-named installed key
+at the identified state. Execution at this level uses the publisher's committed
+wrapper, requires explicit publisher trust, and MUST be reported as
+`publisher-trusted code`; source reproduction, read eligibility, and confinement
+are separate checks.
 
 #### Level 3 — Reproduced source and executable artifacts
 
@@ -499,9 +503,10 @@ compiler output. A rebuilt key missing from `S`, or a shipped key missing from
 the rebuild, fails Level 3.
 
 The report MUST record the actual compiler/runtime and any version mismatch.
-Level 3 establishes artifact reproduction under those trusted tools. It does
-not identify unique original source, prove general semantic equivalence or
-compiler correctness, establish read eligibility, or make execution safe.
+Level 3 establishes that the published source reproduces the shipped compiler
+artifacts byte-for-byte under those trusted tools, including the keys matched at
+Level 2. Read eligibility and confinement are established separately for the
+selected call.
 
 #### Verification report and reuse
 
@@ -597,9 +602,10 @@ full privileges is not confinement.
 
 Level 2 execution, if local policy permits it, MUST be marked publisher-trusted.
 Level 3 execution may be marked source-reproduced. Neither label implies
-eligibility or host confinement. A successful result is a local computation at
-the reported state; it is not a proof, transaction, transaction simulation,
-future-state prediction, or guarantee that a later transaction would succeed.
+eligibility or host confinement. After those gates pass, a successful result is
+an exactly typed local computation from the reported state and arguments under
+the reported tools and assumptions. It produces no proof or transaction and
+makes no claim about future state or later transaction acceptance.
 
 ### Outcomes and failure behavior
 

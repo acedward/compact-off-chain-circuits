@@ -69,7 +69,7 @@ describe.skipIf(!isBuilt())(`F1, F2, F5: the executed circuit and bundle code ($
   /** An interface bundle compiled from an edited copy of the fungible interface source. */
   const editedBundle = (name, editSource) => {
     const c = integrationOnlyTree(join(s.dir, `tree-${name}`));
-    const src = join(c, 'integrations', 'openzeppelin', `${name}.Interface.compact`);
+    const src = join(c, `${name}.Interface.compact`);
     writeFileSync(src, editSource(readFileSync(interfaceSrc('fungible'), 'utf8')));
     const out = compile(src, join(s.dir, `out-${name}`));
     writeFileSync(join(out, 'contract', 'package.json'), '{ "type": "module" }\n');

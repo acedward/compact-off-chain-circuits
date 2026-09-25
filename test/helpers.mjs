@@ -25,7 +25,7 @@ export const PUBLISHED = {
  */
 export const userKeyArg = (name) => `key:0x${Buffer.concat([Buffer.from(name, 'utf8'), Buffer.alloc(32)]).subarray(0, 32).toString('hex')}`;
 
-export const interfaceSrc = (example) => join(REPO, 'compact', 'integrations', 'openzeppelin', {
+export const interfaceSrc = (example) => join(REPO, 'compact-examples', 'openzeppelin', {
   fungible: 'FungibleTokenReadable', nft: 'NonFungibleTokenReadable', multi: 'MultiTokenReadable',
 }[example] + '.Interface.compact');
 export const interfaceOut = (example) => join(REPO, 'build', example, 'interface');
@@ -41,7 +41,7 @@ export const BUILD_HINT = 'build/ is missing or incomplete — run scripts/build
  * own; `scripts/check-keys.mjs` compares its keys with `build/fungible/full`.
  */
 export const PRIVATE = 'fungible-private';
-export const privateSrc = join(REPO, 'compact', 'examples', PRIVATE, 'Interface.compact');
+export const privateSrc = join(REPO, 'compact-examples', PRIVATE, 'Interface.compact');
 export const isPrivateBuilt = () => isBuilt() && existsSync(join(interfaceOut(PRIVATE), 'keys'));
 export const PRIVATE_BUILD_HINT = `build/${PRIVATE} is missing — run scripts/build.sh`;
 
@@ -70,17 +70,18 @@ export function scratch(label) {
 }
 
 /**
- * A copy of the repository's Compact tree containing ONLY what an integration
- * is allowed to depend on: `compact/vendor`, `compact/OffChainInterface.compact`
- * and `compact/integrations`. No examples, no tests, no tools.
+ * A copy, under `dir`, of ONLY what an OpenZeppelin interface may depend on: the
+ * standard's module `compact/OffChainInterface.compact` and
+ * `compact-examples/openzeppelin/` (the vendored modules, the Readable wrappers
+ * and their interfaces). No deployable contract, no test, no tool. Returns the
+ * copy's `openzeppelin` directory, where an interface next to the wrappers goes.
  */
 export function integrationOnlyTree(dir) {
-  const c = join(dir, 'compact');
-  mkdirSync(c, { recursive: true });
-  cpSync(join(REPO, 'compact', 'vendor'), join(c, 'vendor'), { recursive: true });
-  cpSync(join(REPO, 'compact', 'integrations'), join(c, 'integrations'), { recursive: true });
-  cpSync(join(REPO, 'compact', 'OffChainInterface.compact'), join(c, 'OffChainInterface.compact'));
-  return c;
+  mkdirSync(join(dir, 'compact'), { recursive: true });
+  cpSync(join(REPO, 'compact', 'OffChainInterface.compact'), join(dir, 'compact', 'OffChainInterface.compact'));
+  const oz = join(dir, 'compact-examples', 'openzeppelin');
+  cpSync(join(REPO, 'compact-examples', 'openzeppelin'), oz, { recursive: true });
+  return oz;
 }
 
 /**

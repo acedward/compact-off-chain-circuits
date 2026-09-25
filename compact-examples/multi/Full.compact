@@ -24,7 +24,7 @@
 pragma language_version >= 0.23.0;
 
 import CompactStandardLibrary;
-import "../../integrations/openzeppelin/MultiTokenReadable" prefix MultiToken_;
+import "../openzeppelin/MultiTokenReadable" prefix MultiToken_;
 
 export { ContractAddress, Either, Maybe };
 

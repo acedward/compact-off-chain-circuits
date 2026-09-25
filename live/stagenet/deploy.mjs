@@ -42,7 +42,7 @@ const FULL_OUT = join(REPO, 'build', 'fungible', 'full');          // all 19 cir
 const LIVE_OUT = join(HERE, 'contracts', 'managed', 'ERC20Live');    // the 7 circuits deployed first
 const INSERTED_LATER = ['transfer', 'approve', 'transferFrom'];
 const INTERFACE_OUT = join(REPO, 'build', 'fungible', 'interface');
-const INTERFACE_SRC = join(REPO, 'compact', 'integrations', 'openzeppelin', 'FungibleTokenReadable.Interface.compact');
+const INTERFACE_SRC = join(REPO, 'compact-examples', 'openzeppelin', 'FungibleTokenReadable.Interface.compact');
 const SITE_DIR = join(HERE, 'site');
 const RECORD = join(HERE, 'deployment.json');
 const PAGES = 'https://compact-off-chain-circuits.pages.dev';
@@ -62,7 +62,7 @@ const TARGETS = {
   },
   private: {
     key: 'privateInterface', token: { name: 'Off-Chain Reads Private Token', symbol: 'OCRP', decimals: 18n }, privateStateId: 'coc-erc20-private',
-    interfaceSrc: join(REPO, 'compact', 'examples', 'fungible-private', 'Interface.compact'),
+    interfaceSrc: join(REPO, 'compact-examples', 'fungible-private', 'Interface.compact'),
     interfaceOut: join(REPO, 'build', 'fungible-private', 'interface'),
     bundleDir: join(SITE_DIR, 'public-interface', 'erc20-private'), url: `${PAGES}/public-interface/erc20-private/index.json`,
   },

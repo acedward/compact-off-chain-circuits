@@ -13,7 +13,7 @@
 pragma language_version >= 0.23.0;
 
 import CompactStandardLibrary;
-import "../../../compact/integrations/openzeppelin/FungibleTokenReadable" prefix FungibleToken_;
+import "../../../compact-examples/openzeppelin/FungibleTokenReadable" prefix FungibleToken_;
 
 export { ContractAddress, Either, Maybe };
 

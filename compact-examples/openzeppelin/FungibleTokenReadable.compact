@@ -20,8 +20,8 @@ pragma language_version >= 0.23.0;
 
 module FungibleTokenReadable {
   import CompactStandardLibrary;
-  import "../../vendor/openzeppelin/token/FungibleToken" prefix FungibleToken_;
-  import "../../OffChainInterface" prefix OffChainInterface_;
+  import "./vendor/token/FungibleToken" prefix FungibleToken_;
+  import "../../compact/OffChainInterface" prefix OffChainInterface_;
 
   /**
    * @description Commits this contract to an off-chain interface bundle.

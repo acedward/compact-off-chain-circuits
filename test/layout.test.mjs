@@ -43,7 +43,7 @@ describe.skipIf(!hasCompact() || !isBuilt())(`what changes a verifier key (${has
   /** A private copy of the integration tree, optionally with the module edited. */
   const tree = (name, editModule) => {
     const c = integrationOnlyTree(join(s.dir, name));
-    const modPath = join(c, 'vendor', 'openzeppelin', 'token', 'NonFungibleToken.compact');
+    const modPath = join(c, 'vendor', 'token', 'NonFungibleToken.compact');
     if (editModule) writeFileSync(modPath, editModule(readFileSync(modPath, 'utf8')));
     return c;
   };
@@ -57,7 +57,7 @@ describe.skipIf(!hasCompact() || !isBuilt())(`what changes a verifier key (${has
       })) out = out.replace(new RegExp(`(?<![\\w])${from}(?![\\w])`, 'g'), to);
       return out;
     });
-    const src = join(c, 'integrations', 'openzeppelin', 'Renamed.Interface.compact');
+    const src = join(c, 'Renamed.Interface.compact');
     writeFileSync(src, IFACE('M_', 'somethingElse'));
     const out = compile(src, join(s.dir, 'out-renamed'));
 
@@ -70,7 +70,7 @@ describe.skipIf(!hasCompact() || !isBuilt())(`what changes a verifier key (${has
       '  export ledger _isInitialized: Boolean;',
       '  export ledger _inserted: Uint<64>;\n  export ledger _isInitialized: Boolean;',
     ));
-    const src = join(c, 'integrations', 'openzeppelin', 'Shifted.Interface.compact');
+    const src = join(c, 'Shifted.Interface.compact');
     writeFileSync(src, IFACE('M_', 'tokenId'));
     const out = compile(src, join(s.dir, 'out-shifted'));
 
@@ -92,7 +92,7 @@ describe.skipIf(!hasCompact() || !isBuilt())(`what changes a verifier key (${has
 
   it('renaming the published circuit keeps the key but loses the entry point, and deploy-check refuses', () => {
     const c = tree('renamed-circuit');
-    const src = join(c, 'integrations', 'openzeppelin', 'RenamedCircuit.Interface.compact');
+    const src = join(c, 'RenamedCircuit.Interface.compact');
     writeFileSync(src, [
       'pragma language_version >= 0.23.0;',
       'import CompactStandardLibrary;',
@@ -139,7 +139,7 @@ describe.skipIf(!hasCompact() || !isBuilt())(`what changes a verifier key (${has
   })) {
     it(`an extra ledger declaration ${name} takes the last slot and leaves the key identical`, () => {
       const c = tree(`extra-${name.replace(/\W/g, '_')}`);
-      const src = join(c, 'integrations', 'openzeppelin', 'Extra.Interface.compact');
+      const src = join(c, 'Extra.Interface.compact');
       writeFileSync(src, iface);
       const out = compile(src, join(s.dir, `out-extra-${name.replace(/\W/g, '_')}`));
       expect(ledgerOrder(out)).toEqual(['0:_name', '1:_symbol', '2:_isInitialized', '3:_owners', '4:_balances',

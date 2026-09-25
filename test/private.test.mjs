@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// The private interface, compact/examples/fungible-private/Interface.compact: a
+// The private interface, compact-examples/fungible-private/Interface.compact: a
 // second interface for the fungible example's contract that imports no module.
 // It declares the deployed ledger itself, in the deployed order and with the
 // deployed types, as hidden1 … hidden7, and publishes the six reads with their
@@ -41,11 +41,11 @@ const run = promisify(execFile);
  * declarations themselves, so the list follows the sources.
  */
 const DEPLOYED_SOURCES = [
-  'compact/examples/fungible/Full.compact',
-  'compact/integrations/openzeppelin/FungibleTokenReadable.compact',
+  'compact-examples/fungible/Full.compact',
+  'compact-examples/openzeppelin/FungibleTokenReadable.compact',
   'compact/OffChainInterface.compact',
-  'compact/vendor/openzeppelin/token/FungibleToken.compact',
-  'compact/vendor/openzeppelin/utils/Utils.compact',
+  'compact-examples/openzeppelin/vendor/token/FungibleToken.compact',
+  'compact-examples/openzeppelin/vendor/utils/Utils.compact',
 ];
 const DECLARATION = /^\s*(?:export\s+)?(?:pure\s+|sealed\s+)?(circuit|witness|ledger)\s+([A-Za-z_$][\w$]*)/gm;
 function deployedDeclarations() {

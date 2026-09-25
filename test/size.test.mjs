@@ -73,7 +73,7 @@ describe.skipIf(!isBuilt())(`footprint (${isBuilt() ? 'built' : BUILD_HINT})`, (
 
   it.skipIf(!hasCompact())(`a bundle exposing one circuit keeps its compiled artifacts under 64 KB (${hasCompact() ? 'ok' : COMPACT_HINT})`, () => {
     const c = integrationOnlyTree(join(s.dir, 'one'));
-    const src = join(c, 'integrations', 'openzeppelin', 'One.Interface.compact');
+    const src = join(c, 'One.Interface.compact');
     writeFileSync(src, [
       'pragma language_version >= 0.23.0;',
       'import CompactStandardLibrary;',

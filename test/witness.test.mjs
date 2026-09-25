@@ -22,7 +22,7 @@ describe.skipIf(!hasCompact() || !isBuilt())(`circuits with witnesses are refuse
   beforeAll(() => {
     s = scratch('witness');
     const c = integrationOnlyTree(join(s.dir, 'tree'));
-    src = join(c, 'integrations', 'openzeppelin', 'Transferable.Interface.compact');
+    src = join(c, 'Transferable.Interface.compact');
     writeFileSync(src, [
       'pragma language_version >= 0.23.0;',
       'import CompactStandardLibrary;',

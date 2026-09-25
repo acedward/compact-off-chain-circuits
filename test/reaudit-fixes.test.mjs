@@ -383,10 +383,10 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
 
   // -------------------------------------------------------------------------
   describe.skipIf(!hasCompact())(`F5: Level 3 compiles only files inside the bundle (${hasCompact() ? 'ok' : COMPACT_HINT})`, () => {
-    const IFACE = join('src', 'integrations', 'openzeppelin', 'FungibleTokenReadable.Interface.compact');
-    const MODULES = ['src/integrations/openzeppelin/FungibleTokenReadable.compact', 'src/OffChainInterface.compact',
-      'src/vendor/openzeppelin/token/FungibleToken.compact', 'src/vendor/openzeppelin/utils/Utils.compact'];
-    const OZ = join(REPO, 'compact', 'integrations', 'openzeppelin');
+    const IFACE = join('src', 'compact-examples', 'openzeppelin', 'FungibleTokenReadable.Interface.compact');
+    const MODULES = ['src/compact-examples/openzeppelin/FungibleTokenReadable.compact', 'src/compact/OffChainInterface.compact',
+      'src/compact-examples/openzeppelin/vendor/token/FungibleToken.compact', 'src/compact-examples/openzeppelin/vendor/utils/Utils.compact'];
+    const OZ = join(REPO, 'compact-examples', 'openzeppelin');
     /** The genuine bundle without its four modules, its interface importing `spec` instead. */
     const importing = (name, spec) => copyOf(name, (d) => {
       for (const m of MODULES) rmSync(join(d, ...m.split('/')));
@@ -436,7 +436,7 @@ describe.skipIf(!isBuilt())(`re-audit findings on a genuine bundle (${isBuilt() 
 
     it('a module inside the bundle directory that index.json does not list fails Level 3', () => {
       const dir = copyOf('F5-unlisted', (d) => {
-        const module = join(d, 'src', 'integrations', 'openzeppelin', 'FungibleTokenReadable.compact');
+        const module = join(d, 'src', 'compact-examples', 'openzeppelin', 'FungibleTokenReadable.compact');
         const text = readFileSync(module);
         rmSync(module);
         writeIndex(d);                  // listed without the module ...

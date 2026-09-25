@@ -42,21 +42,22 @@ describe.skipIf(!hasCompact())(`isolation (${hasCompact() ? 'compiler present' :
     expect(info.witnesses).toEqual([]);
   });
 
-  describe('integrations compile with only vendor + the pattern module present', () => {
-    let tree;
-    beforeAll(() => { tree = integrationOnlyTree(join(s.dir, 'integrations')); });
+  describe('the OpenZeppelin interfaces compile with only the vendored modules, the wrappers and the standard\'s module present', () => {
+    let root, tree;
+    beforeAll(() => { root = join(s.dir, 'integrations'); tree = integrationOnlyTree(root); });
 
-    it('the tree contains no examples, tests or tools', () => {
-      const files = walk(tree).map((f) => relative('.', f));
-      expect(files).toContain('OffChainInterface.compact');
-      expect(files.some((f) => f.startsWith('vendor/'))).toBe(true);
-      expect(files.some((f) => f.startsWith('integrations/'))).toBe(true);
-      expect(files.some((f) => f.includes('examples') || f.includes('test') || f.includes('src'))).toBe(false);
+    it('the tree contains no deployable contract, test or tool', () => {
+      const files = walk(root).map((f) => relative('.', f));
+      expect(files).toContain('compact/OffChainInterface.compact');
+      expect(files.some((f) => f.startsWith('compact-examples/openzeppelin/vendor/'))).toBe(true);
+      expect(files.some((f) => /^compact-examples\/openzeppelin\/[^/]+Readable\.compact$/.test(f))).toBe(true);
+      expect(files.filter((f) => f !== 'compact/OffChainInterface.compact' && !f.startsWith('compact-examples/openzeppelin/'))).toEqual([]);
+      expect(files.some((f) => f.endsWith('Full.compact') || f.includes('test') || f.includes('src'))).toBe(false);
     });
 
     for (const [example, module] of Object.entries(MODULES)) {
       it.skipIf(!isBuilt())(`${module}.Interface.compact compiles there and reproduces the repository keys (${isBuilt() ? 'built' : BUILD_HINT})`, () => {
-        const out = compile(join(tree, 'integrations', 'openzeppelin', `${module}.Interface.compact`), join(s.dir, `out-${example}`));
+        const out = compile(join(tree, `${module}.Interface.compact`), join(s.dir, `out-${example}`));
         const keys = readdirSync(join(out, 'keys')).filter((f) => f.endsWith('.verifier')).sort();
         expect(keys.length).toBeGreaterThan(0);
         for (const k of keys) {

@@ -3,7 +3,7 @@
 # that each interface circuit's verifier key is byte-identical to the one the
 # example contract deploys (scripts/check-keys.mjs lists the pairs). The fungible
 # example has two interfaces: the open one, which imports its module, and the
-# private one in compact/examples/fungible-private/, which imports none.
+# private one in compact-examples/fungible-private/, which imports none.
 #
 #   scripts/build.sh                 incremental (skips a target whose output is
 #                                    newer than every .compact source)
@@ -29,12 +29,12 @@ for a in "$@"; do
   esac
 done
 
-# example directory : integration module base name
+# example directory : Readable module base name (compact-examples/openzeppelin/)
 TOKENS=(fungible nft multi)
 declare -a MODULES=(FungibleTokenReadable NonFungibleTokenReadable MultiTokenReadable)
 
 newest_source() {
-  find "$ROOT/compact" -name '*.compact' -print0 | xargs -0 stat -f '%m' 2>/dev/null | sort -rn | head -1
+  find "$ROOT/compact" "$ROOT/compact-examples" -name '*.compact' -print0 | xargs -0 stat -f '%m' 2>/dev/null | sort -rn | head -1
 }
 NEWEST_SRC="$(newest_source)"
 
@@ -56,11 +56,11 @@ compile() { # $1 src  $2 outdir  $3 label
 echo "== interfaces =="
 for i in "${!TOKENS[@]}"; do
   t="${TOKENS[$i]}"; m="${MODULES[$i]}"
-  compile "$ROOT/compact/integrations/openzeppelin/$m.Interface.compact" "$ROOT/build/$t/interface" "$t/interface ($m.Interface.compact)"
+  compile "$ROOT/compact-examples/openzeppelin/$m.Interface.compact" "$ROOT/build/$t/interface" "$t/interface ($m.Interface.compact)"
 done
 # The second, private interface of the fungible example. It has no contract of
 # its own; check-keys compares it with build/fungible/full.
-compile "$ROOT/compact/examples/fungible-private/Interface.compact" "$ROOT/build/fungible-private/interface" "fungible-private/interface (examples/fungible-private/Interface.compact)"
+compile "$ROOT/compact-examples/fungible-private/Interface.compact" "$ROOT/build/fungible-private/interface" "fungible-private/interface (compact-examples/fungible-private/Interface.compact)"
 
 if [ "$INTERFACES_ONLY" -eq 1 ]; then
   echo "(--interfaces: skipping example contracts and the key check)"
@@ -69,7 +69,7 @@ fi
 
 echo "== examples (deployable contracts; minutes) =="
 for t in "${TOKENS[@]}"; do
-  compile "$ROOT/compact/examples/$t/Full.compact" "$ROOT/build/$t/full" "$t/full (examples/$t/Full.compact)"
+  compile "$ROOT/compact-examples/$t/Full.compact" "$ROOT/build/$t/full" "$t/full (compact-examples/$t/Full.compact)"
 done
 
 echo "== verifier key identity =="

@@ -4,7 +4,7 @@
 
 This repository contains a Draft MIP and a reference implementation for
 discovering, verifying, and locally evaluating Compact public-state interfaces.
-A contract emits a MIP-0002 event containing a bundle commitment and index URI.
+A contract emits an event containing a bundle commitment and index URI.
 A consumer can then check the committed files, compare published verifier keys
 with named installed operations, and reproduce the generated artifacts.
 

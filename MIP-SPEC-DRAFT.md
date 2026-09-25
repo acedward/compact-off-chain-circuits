@@ -31,7 +31,7 @@ License: Apache-2.0
 ## Abstract
 
 This MIP defines how a Midnight contract publishes a discoverable Compact
-interface for local public-state reads. A MIP-0002 event commits to a bundle of
+interface for local public-state reads. An event commits to a bundle of
 source, verifier keys, generated code, and compiler metadata. Level 1
 establishes that the retrieved path/content set matches that commitment. Level
 2 establishes that every published key equals the key of its same-named
@@ -120,7 +120,7 @@ artifact hosting availability.
 |---|---|---|---|
 | Network | identified Midnight network, not a human label alone | Stagenet genesis observed on 2026-09-25 | immutable network identity in reports |
 | Node / consensus | no protocol or consensus change | Stagenet node `2.0.0-d9729c13` observed on 2026-09-25 | state/event anchors when claimed by provider |
-| Ledger | Midnight 2.x, Ledger v9 | Stagenet observation dated 2026-09-25 | MIP-0002 `Misc` events and installed operations |
+| Ledger | Midnight 2.x, Ledger v9 | Stagenet observation dated 2026-09-25 | `Misc` events and installed operations |
 | Proof system / wallet | existing publication transaction only; not applicable to local read execution | deployment tooling exercised separately | no proof or wallet input for a local read |
 | Compact | compiler 0.34.0; language 0.26.0 | historical bundle reproduced with compiler revision `1f671fc27818df2b2676b3a97f85b2b821756243` | compile source, keys, JS, typings, and `contract-info.json` |
 | Runtime | `@midnight-ntwrk/compact-runtime` 0.19.0 | reference implementation pin | deserialize public state and evaluate generated code |
@@ -150,13 +150,13 @@ numbered name by silently substituting digits into this Draft constant.
 
 A publishing contract MUST expose an installed operation with Compact signature
 `publishBundle(payload: Bytes<256>): []`, or an application-authorized wrapper
-with that signature. A successful call MUST emit exactly one MIP-0002 `Misc`
+with that signature. A successful call MUST emit exactly one `Misc`
 event carrying the fixed name and the supplied 256-byte payload. The operation
 MUST NOT reinterpret or modify payload bytes. Publication occurs in an ordinary
 post-deployment transaction because the target constructors do not emit this
 event.
 
-The MIP-0002 `Misc` payload is exactly 256 bytes:
+The `Misc` payload is exactly 256 bytes:
 
 | Offset | Length | Meaning |
 |---:|---:|---|
@@ -967,7 +967,7 @@ must be measured separately.
 
 Normative:
 
-- [MIP-0002, Public Contract Log Emission, pinned revision](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/a3e664aadf1b76124354aba4f56ec01651a95291/mips/mip-0002-public-contract-log-emission.md) — event model and service-order boundary.
+- [Public Contract Log Emission, pinned revision](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/a3e664aadf1b76124354aba4f56ec01651a95291/mips/mip-0002-public-contract-log-emission.md) — event model and service-order boundary.
 - [Zcash Protocol Specification v2026.7.0 source, commit `9ac2e20`](https://github.com/zcash/zips/blob/9ac2e20d298256250c4decb891e85aaa02fccc4c/protocol/protocol.tex) — Jubjub representation and Sapling GroupHash; referenced source SHA-256 `c1e033672ff90d01857038333f2fec57219ae9bed96154c12267a968b57ee4ac`.
 - [FIPS 180-4](https://doi.org/10.6028/NIST.FIPS.180-4) — SHA-256.
 - [RFC 7693](https://www.rfc-editor.org/rfc/rfc7693) — BLAKE2s.

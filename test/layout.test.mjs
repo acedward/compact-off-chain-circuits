@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// SC-003 / US2-AS2 / US2-AS3: what a verifier key does and does not depend on.
+// What a verifier key does and does not depend on, which is what lets an
+// interface be a different source file from the deployed contract.
 //
 //   renaming every ledger field, the parameter and the import prefix  -> same key
 //   a ledger declaration inserted before a slot the circuit reads     -> different

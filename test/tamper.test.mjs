@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// SC-002 / US1-AS3 / US1-AS4: the edits an attacker or a careless host can make
-// must each be caught, and must stop execution.
+// The edits an attacker or a careless host can make must each be caught, and
+// must stop execution.
 //
 //   any one-byte change to any listed file       -> Level 1 fails, naming the file
 //   any change to index.json's entries           -> Level 1 fails on the commitment

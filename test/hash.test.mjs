@@ -20,7 +20,7 @@ const hex = (b) => Buffer.from(b).toString('hex');
 const enc = (pt) => encodePoint(pt).toString('hex');
 const shuffle = (xs) => { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
-/** A realistic entry set: the paths of the NFT example bundle, with made-up contents. */
+/** A realistic entry set: paths an NFT bundle lists, with made-up contents. */
 const ENTRIES = [
   'README.md', 'package.json', 'out/compiler/contract-info.json', 'out/contract/index.d.ts', 'out/contract/index.js',
   'out/contract/package.json', 'out/keys/balanceOf.verifier', 'out/keys/name.verifier', 'out/keys/ownerOf.verifier',

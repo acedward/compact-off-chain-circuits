@@ -53,7 +53,7 @@ describe.skipIf(!isBuilt())(`what a local publishBundle call emits (${isBuilt() 
       expect(logged.data.content.value).toHaveLength(1);
       expect(Buffer.from(logged.data.content.value[0]).equals(Buffer.concat([NAME_BYTES, full]))).toBe(true);
 
-      // The 00021 layout: commitment (32 bytes) ++ utf8(url), zero padded. The
+      // The payload layout: commitment (32 bytes) ++ utf8(url), zero padded. The
       // runtime strips the trailing zeros of the atom; the name keeps its padding.
       const payload = assemblePayload(Buffer.alloc(32, 7), 'https://example.invalid/x/index.json');
       const [e] = (await sim.callCircuit('publishBundle', Uint8Array.from(payload))).context.events;

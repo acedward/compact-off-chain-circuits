@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// SC-004: the on-chain footprint per published bundle version, and the size of
-// the bundle itself.
+// The on-chain footprint per published bundle version, and the size of the
+// bundle itself.
 //
 // On chain the numbers are exact: one `Misc` event, 32 bytes of name plus 256
 // bytes of payload.
 //
-// Off chain, SC-004's "<= 64 KB for one exposed circuit" is asserted against the
-// compiled artifacts, which is what that figure was measured on. A whole
-// OpenZeppelin bundle is larger, because it also carries the published source —
+// Off chain, "<= 64 KB for one exposed circuit" is asserted against the
+// compiled artifacts, which is what that figure measures. A whole OpenZeppelin
+// bundle is larger, because it also carries the published source —
 // `NonFungibleToken.compact` alone is 36 KB of mostly documentation. Those
 // totals are asserted against generous ceilings and printed, so a regression
 // shows up without pinning an arbitrary number. The bundle carries no copy of

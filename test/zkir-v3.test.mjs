@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Bundles for contracts compiled with `--feature-zkir-v3` (ZKIR v3), such as a contract
-// whose circuits come from MinoCrab. compactc marks the key format in every verifier
+// Bundles for contracts compiled with `--feature-zkir-v3` (ZKIR v3). compactc marks the key format in every verifier
 // key (`[v6]` by default, `[v7]` with the flag); the bundle records the flag the keys
 // imply, and Level 3 recompiles with it. A bundle may name only flags the verifier
 // knows, because the bundle comes from the party being checked.
@@ -70,7 +69,7 @@ describe.skipIf(!hasCompact())(`a ZKIR v3 bundle reaches Level 3 (${hasCompact()
     expect(bundle.compact.flags).toEqual(['--feature-zkir-v3']);
     const pkg = JSON.parse(readFileSync(join(bundle.outDir, 'package.json'), 'utf8'));
     expect(pkg.compact.flags).toEqual(['--feature-zkir-v3']);
-    // index.json names the same compiler and flag (D32).
+    // index.json names the same compiler and flag.
     expect(JSON.parse(readFileSync(join(bundle.outDir, 'index.json'), 'utf8')).compiler)
       .toEqual({ name: 'compactc', version: pkg.compact.compiler, flags: ['--feature-zkir-v3'] });
     for (const f of bundle.keyFiles) {

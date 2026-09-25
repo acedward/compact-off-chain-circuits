@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// D32: index.json carries the expected hash (the commitment, as 64 lowercase
+// index.json carries the expected hash (the commitment, as 64 lowercase
 // hex digits) and the compiler that built the bundle. Neither field is covered
 // by the commitment, which covers only the listed files, and index.json is
 // never listed. So the verifier trusts neither: Level 1 compares `hash` with

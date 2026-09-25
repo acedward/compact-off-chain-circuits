@@ -10,7 +10,7 @@
 //      files into a private directory, so verify() never sees the planted copy;
 //   2. the wrapper is loaded against the verifier's own runtime (src/load.mjs),
 //      so even executing directly in the planted directory reads genuinely.
-//      This half fails on the pre-fix loader.
+//      This half fails with a loader that imports the wrapper in place.
 import { createRequire } from 'node:module';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

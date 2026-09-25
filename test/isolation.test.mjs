@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// FR-018 / SC-007: the reusable parts of this repository must stand alone. The
-// pattern module compiles copied on its own into an unrelated project, and the
-// integrations compile from a tree that contains nothing but `compact/vendor`,
-// `compact/OffChainInterface.compact` and `compact/integrations` — no examples,
-// no tests, no tools.
+// The reusable parts of this repository must stand alone, so that an owner can
+// copy them into another project. The standard's module compiles copied on its
+// own next to an unrelated contract, and the OpenZeppelin interfaces compile from
+// a tree that holds nothing but `compact/OffChainInterface.compact` and
+// `compact-examples/openzeppelin/` (the vendored modules and the wrappers): no
+// deployable contract, no test, no tool.
 import { cpSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -17,7 +18,7 @@ describe.skipIf(!hasCompact())(`isolation (${hasCompact() ? 'compiler present' :
   beforeAll(() => { s = scratch('isolation'); });
   afterAll(() => s?.cleanup());
 
-  it('the pattern module is self-contained and exposes exactly one circuit', () => {
+  it('the standard\'s module is self-contained and exposes exactly one circuit', () => {
     const dir = join(s.dir, 'pattern');
     mkdirSync(dir, { recursive: true });
     cpSync(join(REPO, 'compact', 'OffChainInterface.compact'), join(dir, 'OffChainInterface.compact'));
@@ -62,7 +63,7 @@ describe.skipIf(!hasCompact())(`isolation (${hasCompact() ? 'compiler present' :
         expect(keys.length).toBeGreaterThan(0);
         for (const k of keys) {
           // Same source, different directory, separate compiler run: identical
-          // bytes. This is SC-006's determinism claim as well as FR-018's.
+          // bytes: the build is deterministic, and the module needs nothing else.
           expect(readFileSync(join(out, 'keys', k)).equals(readFileSync(join(interfaceOut(example), 'keys', k)))).toBe(true);
         }
       });

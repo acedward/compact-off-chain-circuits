@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// FR-015 / edge case "circuit takes a witness": a circuit with a private input
-// is not a read. The consumer cannot supply the input, and running it with a
-// stub would answer a different question than the chain did. Both tools refuse.
+// A circuit that takes a witness has a private input, so it is not a read. The
+// consumer cannot supply the input, and running it with a stub would answer a
+// different question than the chain did. Both tools refuse.
 //
 // The fixture exposes `transfer`, which derives the caller's account id from
 // `wit_NonFungibleTokenSK` — so the compiled interface declares a witness.

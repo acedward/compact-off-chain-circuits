@@ -30,33 +30,34 @@ License: Apache-2.0
 
 ## Abstract
 
-This MIP describes a methodology for publishing and verifying public interfaces
-for Compact contracts. A contract event points to a committed bundle containing
-source and the supporting artifacts needed to interpret selected public-state
-operations. Level 1 establishes the integrity of the retrieved bundle. Level 2
-establishes that each published keyed operation has the same verifier key as the
-same-named installed operation at an identified contract state. Level 3 uses a
-trusted toolchain to reproduce all code and artifacts used for the claimed
-operations from the published source.
+This MIP describes how a Compact contract publishes a discoverable bundle and
+how a consumer verifies its artifacts. A contract event identifies immutable
+bundle content and a retrieval location. Level 1 establishes that the retrieved
+files match the on-chain commitment. Level 2 establishes that every published
+keyed operation has the same verifier key as the same-named installed operation
+at an identified contract state. Level 3 uses a trusted compiler and disclosed
+build inputs to reproduce the keys, generated JavaScript, operation
+instructions within that JavaScript, and supporting artifacts for those named
+operations.
 
-A successful source-verified local read adds two independent conditions: the
-operation is eligible to read the selected public state with the supplied typed
-arguments, and its execution is confined by host-access and resource limits.
-The result identifies the state, operation, arguments, tools, completed checks,
-and remaining assumptions. It requires no proof or transaction.
+The output is a verified interface artifact set with a record of its
+publication, state, named operations, tools, completed levels, and provider
+assumptions. Verification stops at Level 3; executing the generated code is
+outside this MIP.
 
 ## Motivation
 
-Installed verifier keys and raw contract state do not by themselves tell a
-wallet, explorer, or application how to present values such as a token balance
-or configuration setting. A publisher can provide executable code, but a
-consumer needs to know which contract published it, whether the retrieved
-artifacts were altered, whether their operations match the contract, and
-whether the code can be reproduced from disclosed source.
+Installed verifier keys and raw contract state do not tell a wallet, explorer,
+or application where to obtain the source and generated code that describe a
+contract's public interface. Publisher-hosted code alone also leaves the
+consumer unable to tell whether files changed, whether named operations match
+the contract, or whether the generated artifacts came from the published
+source.
 
-The methodology reports those questions separately. Artifact verification does
-not decide whether an operation is a public read or whether its code can run
-safely on a host.
+The three cumulative levels answer those questions separately. This lets a
+consumer distinguish committed files, installed-key equality, and reproducible
+compiler output without treating any one of them as a claim about unique
+original source or code deployed on chain.
 
 ## Specification
 
@@ -65,258 +66,258 @@ safely on a host.
 The target is a Midnight network that supports contract events through the
 dependency declared in `Requires`.
 
-### Publication and discovery
+### Bundle commitment
 
-A **publisher** prepares and hosts a bundle, commits to it, and emits a
-publication event from the contract. A **bundle** contains source plus the keys,
-executable artifacts, and build information required for the intended checks.
-A **consumer** discovers a publication, retrieves the bundle, performs the
-verification levels, and may execute an eligible local read. An **event/state
-provider** supplies the emitting contract, event order, identified contract
-state, installed keys, and the limits of its observation.
+The `[v1]` bundle commitment profile is `ecmh-jubjub-grouphash`: an
+elliptic-curve multiset hash over Jubjub using Sapling GroupHash. Its
+commutative property makes the ordering of bundle entries irrelevant to the
+commitment. The pinned [reference module](https://github.com/acedward/public-interfaces-for-compact-contracts/blob/1879be566e0b6669ce00b73c3b69ef32641f9eb7/src/hash.mjs)
+defines the profile and contains its implementation details.
 
-The publisher makes immutable bundle content available at a retrieval location
-and emits an event that identifies that location and its content commitment.
-The event associates the publication with its emitting contract under the
-provider's provenance assumptions. It does not by itself show that an owner or
-administrator endorsed the publication; authorization remains contract or
-application policy.
+### Open and partial-source interfaces
 
-The consumer selects the newest applicable publication at a stated network,
-contract, and observation point. It records when the provider cannot establish
-complete ordering, finality, or a common event/state snapshot. If a newer
-publication is invalid or unavailable, the consumer reports that outcome rather
-than silently presenting an older publication as current. An older publication
-can still be inspected when it is clearly identified as historical.
+An open interface publishes the full contract source module. A partial-source
+interface publishes source sufficient to rebuild selected named operations,
+including the ledger layout and imports on which they depend. Both forms are
+accepted by exact Level 3 reproduction, not by an assumption that a source
+transformation is harmless.
 
-Retrieval does not execute bundle code. The consumer treats the publisher and
-host as untrusted and applies local transport and resource policy.
+A small retained compiler probe illustrates the boundary. These two source
+excerpts keep the ledger slot, type, and exported operation name while changing
+the ledger label:
 
-### Verification levels
+```compact
+export ledger alpha: Uint<64>;
+export circuit readValue(): Uint<64> { return alpha; }
+```
 
-The levels are cumulative. A consumer completes them in order and records the
-highest level completed; failure or an unavailable prerequisite stops the
-stronger claim.
+```compact
+export ledger beta: Uint<64>;
+export circuit readValue(): Uint<64> { return beta; }
+```
 
-**Level 1 — committed bundle integrity.** The consumer checks that all
-retrieved artifacts required by the publication are present and that their
-content matches the selected publication commitment. Level 1 establishes the
-integrity of those artifacts relative to that commitment. It does not establish
-publisher authority, installed-key equality, source reproduction, or safe
-execution.
+The generated ledger metadata excerpt changes from
+`{"ledger":[{"index":0,"name":"alpha"}]}` to
+`{"ledger":[{"index":0,"name":"beta"}]}`. Retained compilation evidence
+records byte-identical `readValue` keys, showing that key equality does not
+authenticate the original label; this is not a general theorem about renaming.
+Because generated JavaScript may also differ, the renamed source and all
+generated artifacts must be rebuilt and recommitted; manual JSON or JavaScript
+edits fail Level 1 against the old commitment or Level 3 against the source.
 
-**Level 2 — installed verifier-key equality.** The consumer compares every
-published keyed operation with the verifier key of the same-named installed
-operation at the identified contract state. The published set is nonempty and
-every member either matches or Level 2 fails. Level 2 establishes exact key
-equality for those names and that state. It does not
-authenticate executable wrapper behavior; code executed after Level 2 alone
-remains publisher-trusted.
+### Publication
 
-**Level 3 — trusted source and artifact reproduction.** Using an independently
-trusted toolchain and the disclosed build inputs, the consumer compiles the
-published source and compares every key, executable, and supporting compiler
-artifact used for each claimed operation with the bundle. Level 3 ties all code
-used for the operation to the published source under the reported toolchain
-assumptions, including the keys already matched at Level 2. It does not prove
-compiler correctness or identify unique original source text.
+A **publisher** creates a bundle. A **consumer** verifies it. An **event/state
+provider** supplies the emitting contract, publication order, installed keys,
+and identified state together with the limits of its observation.
 
-### Verification limits
+The publisher proceeds in this order:
+
+1. Select a nonempty set of named keyed operations and choose an open or
+   partial-source interface.
+2. Record the source, compiler, and build inputs, then compile the interface.
+3. Collect each named operation's verifier key, generated `.js` including its
+   operation instructions, and supporting compiler artifacts. Check the names
+   and keys against the intended contract state when it is available; this
+   publisher check does not replace consumer Level 2.
+4. Compute the bundle commitment with `ecmh-jubjub-grouphash` and make the
+   bundle available at an immutable retrieval location.
+5. Emit the publication event from the contract, identifying the commitment and
+   retrieval location.
+6. Record the applied and observed event. Submission alone is not an observed
+   publication.
+
+The event ties the publication to its emitting contract under the provider's
+provenance assumptions. It does not by itself prove owner or administrator
+endorsement; publication authorization is contract or application policy.
+
+### Discovery and verification
+
+The consumer selects the newest applicable `[v1]` publication at a stated
+network, contract, and observation point. When the provider cannot establish
+complete ordering, finality, or a common event/state observation, the
+verification record states that limitation. A newer invalid or unavailable
+publication is reported as such rather than silently presenting an older one as
+current. An older publication can be inspected when clearly identified as
+historical.
+
+| Level | One-line guarantee | Dependencies |
+|---|---|---|
+| 1 | The committed bundle file set, file identities, and actual contents match the selected on-chain publication commitment. | Committed bundle files and on-chain event commitment. |
+| 2 | Every published verifier key equals its same-named installed verifier key at the identified contract state. | Level 1 and same-named on-chain verifier keys at that state. |
+| 3 | Trusted compilation exactly reproduces the keys, generated `.js` including its operation instructions, and supporting artifacts used for the named operations. | Level 2, trusted compiler, published source, and disclosed build inputs. |
+
+The consumer verifies in this order:
+
+1. Record the network, contract, selected event, observation point, provider
+   limits, and the contract state used for installed-key comparison.
+2. Retrieve the published files without loading their code. Confirm that the
+   publication and bundle declare `[v1]` and the expected commitment profile.
+3. For Level 1, recompute the commitment over the complete committed bundle
+   file set using each file's identity and actual contents, then compare it with
+   the on-chain event commitment.
+4. For Level 2, obtain installed verifier keys at the recorded state. For every
+   member of the nonempty published keyed-operation set, compare the key with
+   the installed key under exactly the same operation name. A missing name,
+   missing installed key, or mismatch fails Level 2.
+5. For Level 3, use an independently trusted compiler and the disclosed source
+   and build inputs. Rebuild and exactly compare every shipped verifier key,
+   generated `.js` including its operation instructions, and supporting
+   compiler artifact used for each named operation. Missing, additional, or
+   unequal artifacts fail Level 3.
+6. Stop after the artifact comparisons. Produce a verification record naming
+   the publication and state, operations, artifact identity, compiler/build
+   inputs, completed levels, provider assumptions, and any failure or
+   unavailable prerequisite.
+
+Levels are cumulative. A failure or unavailable dependency stops every stronger
+claim.
+
+### Verification limits and lifecycle
+
+Level 1 establishes integrity relative to the chosen commitment, not publisher
+authority or availability. Level 2 establishes the named installed-key
+relationship, not arbitrary JavaScript behavior beside those keys. Level 3
+establishes exact source-to-artifact reproduction under the trusted compiler and
+build inputs. It does not prove compiler correctness, identify unique original
+source text, or imply that generated JavaScript is stored or executed on chain.
 
 Pure circuits have no standalone installed verifier key for the Level 2
-comparison. A pure circuit therefore cannot be independently authenticated as
-a deployed operation merely because its bundle passes Levels 1–3. A pure
-helper can contribute to a keyed operation and is then covered only as part of
-that keyed operation's reproduced computation.
+comparison. They cannot be independently authenticated as deployed operations
+merely because their bundle artifacts reproduce. A pure helper is covered only
+as part of a named keyed operation's reproduced compiler output.
 
-Ledger field names are source labels. Key equality can establish agreement with
-a compiled access pattern and types, but cannot authenticate the labels as the
-original deployed source names or prove the application meaning suggested by a
-name. Installed operation names serve a different purpose: they identify the
-keys compared at Level 2.
+Ledger field names remain source and metadata labels. The example above shows
+why key equality cannot authenticate them as the deployed author's original
+names or prove their suggested meaning. Installed operation names are different:
+they select the on-chain keys compared at Level 2.
 
-Every level also depends on the identity and quality of its inputs. A content
-commitment does not authenticate the event provider, a key match does not
-authenticate arbitrary adjacent code, and source reproduction does not make a
-toolchain trustworthy.
+A changed publication, file, installed key, selected state, source, compiler, or
+build input invalidates the dependent checks. Changed source or generated
+artifacts require recompilation, a new commitment, and a new publication before
+they can receive Levels 1–3 for the changed bundle.
 
-### Local reads
+### Versioning
 
-Artifact verification is not read eligibility. An eligible public read uses a
-keyed operation checked at Level 2, the selected public contract state, and
-correctly typed public arguments. It requires no witness or private state and
-has no ledger writes, event emission, asset effect, cross-contract call, or
-dependence on unsupported context such as an unspecified caller, address,
-wallet, or clock. Comparing final state alone is insufficient because an
-operation can write and later restore state or produce another effect.
-
-Eligibility can be established by sound analysis, complete trusted observation,
-or another method that covers the claimed behavior. When it cannot be
-established, the operation is unsupported as a verified public read.
-
-Compilation and execution remain in a confined environment that grants only
-declared inputs and trusted tooling from the start. It denies other ambient
-filesystem, network, and credential access and limits time, memory, and output.
-Confinement is independent of Levels 1–3 and eligibility; passing one does not
-imply the others.
-
-After Level 3, eligibility, and confinement succeed, the consumer can report a
-source-verified local read. The output is an exactly typed computation for the
-reported state and arguments under the reported tools and assumptions. It is
-not a proof, a transaction simulation, a future-state prediction, or evidence
-that a later transaction will be accepted.
-
-### Results, updates, and failure
-
-A verification record identifies the network, contract, publication and state;
-the operation and arguments when execution occurs; tools and build inputs;
-completed levels; eligibility and confinement status; provider assumptions;
-and any failure or unavailable input. Invalid data, unavailable artifacts,
-unsupported formats or context, resource refusal, verification failure,
-argument failure, and runtime failure remain distinguishable outcomes. None is
-reported as a successful read.
-
-A changed publication, bundle commitment, installed key, selected state,
-toolchain, eligibility decision, or confinement boundary invalidates the parts
-of a cached record that relied on it. Consumers repeat those checks before
-reusing the result under the changed conditions.
-
-### Versioning and implementation boundaries
-
-This MIP standardizes the methodology and the meanings of its guarantees, not a
-wire protocol. It does not select a compiler, compiler options, artifact
-format, commitment construction, transport, or value encoding. Implementations
-document and version those choices, and reject or report unsupported versions
-rather than guessing. Two implementations that choose different formats do not
-become byte-level
-interoperable merely by following this MIP. A future common format can be
-specified separately without changing the separation of guarantees here.
+This methodology version is `[v1]`. A later version uses `[v2]` with its own
+specific rules or is defined by a new MIP. `[v1]` publications are never
+silently reinterpreted under later rules.
 
 ## Rationale
 
-Events provide address-based discovery without placing a complete interface in
-contract state. A content commitment keeps hosted artifacts tied to the selected
-publication. The cumulative levels let inexpensive integrity and key checks
-precede trusted rebuilding, and they make partial evidence reportable
-without overstating it.
+Events provide address-based discovery without placing complete interface
+artifacts in contract state. A content commitment keeps hosted files tied to
+the selected event, and the commutative profile avoids making file order part
+of the commitment. Cumulative levels allow integrity and key checks to precede
+the more expensive trusted rebuild while keeping each conclusion precise.
 
-Doing nothing leaves each consumer to discover and trust interfaces out of
-band. A central registry can simplify discovery but introduces registry
-authority and availability. Storing complete artifacts in contract state
-improves availability at greater on-chain cost and still does not establish
-read eligibility or host safety. The event-plus-bundle method keeps those
-tradeoffs visible and permits alternative implementations.
+Doing nothing leaves discovery and trust entirely out of band. A central
+registry adds registry authority and availability. Storing all files in
+contract state improves availability at greater on-chain cost. The event and
+bundle approach keeps large artifacts off chain while preserving a verifiable
+relationship to the emitting contract and its named installed keys.
 
 ## Path to Active
 
 ### Acceptance Criteria
 
-Progress beyond Draft requires independent review that the three levels,
-verification limits, read conditions, lifecycle, and trust statements are
-internally sound. Acceptance also requires evidence from more than one
-implementation that the methodology can be applied without conflating partial
-checks with a verified read.
+Progress beyond Draft requires independent review of the publication steps,
+commitment profile reference, three level guarantees, field-label example, and
+failure/lifecycle rules. Evidence from an independent consumer must show the
+same Level 1–3 conclusions for a documented implementation format without
+weakening exact artifact comparison.
 
-Implemented status requires a documented implementation format, reproducible
-Level 1–3 evidence, an eligibility mechanism covering the supported operations,
-and effective compilation/execution confinement. Active status additionally
-requires an operational integration on an identified event-capable network,
-including publication ordering, state binding, failure handling, and incident
+Implemented status requires publisher and consumer tooling, reproducible
+artifact evidence, failure cases, and disclosed deviations. Active status
+additionally requires operational evidence on an identified event-capable
+network for publication ordering, state binding, updates, and incident
 ownership. This Draft claims none of those later stages.
 
 ### Implementation Plan
 
-The reference implementation should align its level reports with these
-guarantees, then complete eligibility and confinement. A second implementation
-should exercise the same behavioral cases. Integrators can then validate
-discovery, state binding, updates, and failure reporting on a supported network.
-Any common wire profile is separate implementation or standards work.
+The reference implementation should align its reports and documentation with
+the ordered publication and verification procedures. An independent consumer
+should then reproduce the three levels and the open/partial-source examples.
+Integrators can finally validate discovery, state binding, replacement, and
+failure reporting on a supported network.
 
 ## Backwards Compatibility Assessment
 
 Existing contracts that emit no interface publication continue to operate; a
-consumer simply has no interface to discover through this methodology. Existing
-implementation-specific events and bundles remain interpretable by consumers
-that support their formats. New consumers do not infer compatibility with an
-unknown format, and publishers do not reinterpret old publications under new
-rules.
+consumer simply discovers no interface through this method. Existing `[v1]`
+publications remain usable by consumers that support their implementation
+format. Unknown formats or later versions are not treated as `[v1]`, and old
+publications are not reinterpreted.
 
-Because this MIP does not define a common encoding, it creates no universal wire
-compatibility between implementations. Migration to a later common profile uses
-a new, clearly versioned publication while preserving historical records.
+This MIP does not create byte-level compatibility between otherwise different
+bundle formats. A shared format needs its own documented rules while retaining
+the verification meanings defined here.
 
 ## Security Considerations
 
-The main trust boundaries are the publisher and artifact host, event/state
-provider, commitment construction, compiler and runtime, eligibility mechanism,
-and confinement environment. Event provenance identifies the emitting contract
-under provider assumptions, but does not prove owner endorsement. An incomplete
-provider can omit a newer event or combine observations from different states;
-reports therefore bind conclusions to the provider and observation actually
-used.
+The trust boundaries are the publisher and artifact host, event/state provider,
+commitment construction, and compiler/build environment. Event provenance
+identifies the emitting contract under provider assumptions but does not prove
+owner endorsement. An incomplete provider can omit a newer publication or mix
+observations from different states, so records bind conclusions to the actual
+provider and observation used.
 
-A malicious publisher can place genuine keys beside forged executable code.
-Level 2 deliberately does not authenticate that code; Level 3 is required for a
-source-verified executable. A malicious or faulty toolchain can still reproduce
-incorrect behavior, so tool selection and review remain trust assumptions.
-Changes to installed keys or state can make an earlier conclusion stale.
+A malicious publisher can place genuine keys beside forged JavaScript. Such a
+bundle can satisfy the key relationship but fails Level 3 when the code does
+not reproduce from the published source. A faulty compiler can reproduce faulty
+artifacts, so compiler trust and review remain assumptions. The named
+commitment profile also depends on the security of its implementation; this MIP
+does not provide a new cryptographic proof.
 
-Verified code remains untrusted host code until eligibility and confinement are
-established. Effectful or context-dependent execution can return plausible
-values while violating the read model. Resource exhaustion and ambient access
-remain risks unless bounded before compilation and execution.
-
-Publications reveal their location and commitment. Bundles may reveal source,
-operation names, ledger layout and labels; public state, arguments, results,
-diagnostics, and retrieval metadata can reveal additional information to the
-consumer, provider, host, or local operator. Partial-source publication reduces
-disclosed source but does not make public ledger data confidential.
+Publications reveal a retrieval location and commitment. Bundles can reveal
+source, operation names, ledger layout and labels, build information, and
+generated code. Partial-source publication reduces disclosed source but does
+not make public contract information confidential.
 
 ## Implementation
 
 The [reference repository](https://github.com/acedward/public-interfaces-for-compact-contracts)
-contains one event, bundle, verification, and local-execution prototype. It has
-demonstrated committed artifact checks, installed-key comparison, source-based
-artifact reproduction, and example reads. Those observations apply to its own
-formats and tools.
+contains one publication, bundle, and verifier prototype. Retained evidence
+shows committed artifact checks, installed-key comparison, source-based
+reproduction, a pure helper without a standalone installed key, and the
+`alpha`/`beta` field-label example.
 
-The prototype does not yet establish a complete effect/context eligibility
-decision, secure host confinement, or a cryptographically authenticated common
-event/state snapshot. Its level labels describe implemented checks and are not
-by themselves a claim of full conformance with this methodology. Detailed
-formats, commands, versions, and historical deployment evidence remain in the
-repository and its retained research.
+Those observations apply to the prototype's own format and tools. Its provider
+observations do not establish a cryptographically authenticated common
+event/state snapshot. Operational commands and historical deployment evidence
+remain in the repository and its retained research.
 
 ## Testing
 
-Implementations keep test vectors and deployment evidence with their concrete
-profiles. Methodology tests exercise behavior rather than a universal byte
-format. At minimum, tests show that:
+Concrete implementations retain vectors for their formats. Behavioral tests
+for this methodology cover at least:
 
-- changing a committed artifact prevents Level 1;
-- a published keyed operation without a same-named installed-key match prevents
-  Level 2 for the selected state;
-- genuine installed keys beside executable code not reproduced from source do
-  not pass Level 3;
-- a pure circuit without an installed key is not reported as a verified
-  deployed operation;
-- renamed ledger labels are not reported as authenticated original names;
-- a write-and-restore operation, emitted event, unsupported context, or private
-  input prevents a verified public-read result;
-- changed publications, keys, states, tools, or trust boundaries trigger the
-  relevant revalidation; and
-- confinement and resource failures produce explicit non-success outcomes.
+- reordering bundle entries leaves `ecmh-jubjub-grouphash` unchanged, while a
+  changed, missing, or additional committed file prevents Level 1;
+- a published keyed operation without an exact same-name installed-key match
+  prevents Level 2;
+- genuine installed keys beside forged or manually edited JavaScript or JSON
+  do not pass Level 3;
+- open and partial-source bundles reproduce every artifact used for their named
+  operations;
+- the rebuilt `alpha` and `beta` examples can retain identical `readValue` keys
+  while their source and ledger metadata labels differ;
+- a pure circuit without an installed key is not reported as an independently
+  authenticated deployed operation; and
+- changed publications, installed keys, state, source, compiler, or build
+  inputs trigger the applicable revalidation and republication.
 
-Positive integration evidence identifies the publication, contract state,
-operation, arguments, tools, completed checks, provider limits, and execution
-boundary. Shared code can demonstrate an implementation, but independent review
-is needed before claiming independent conformance evidence.
+Positive evidence identifies the publication, state, named operations,
+artifact identities, compiler/build inputs, completed levels, and provider
+limits. Shared code demonstrates one implementation; independent evidence
+requires an independently built consumer.
 
 ## References
 
 - [Public Contract Log Emission, pinned revision](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/a3e664aadf1b76124354aba4f56ec01651a95291/mips/mip-0002-public-contract-log-emission.md) — event capability and discovery model.
+- [`ecmh-jubjub-grouphash` reference module, pinned revision](https://github.com/acedward/public-interfaces-for-compact-contracts/blob/1879be566e0b6669ce00b73c3b69ef32641f9eb7/src/hash.mjs) — commitment profile implementation.
 - [MIP process and template, pinned revision](https://github.com/midnightntwrk/midnight-improvement-proposals/tree/a3e664aadf1b76124354aba4f56ec01651a95291) — document lifecycle and format.
-- [Midnight documentation, pinned revision](https://github.com/midnightntwrk/midnight-docs/tree/c628ffa243e140fee05b945d94ba79976654e5f6) — Compact and disclosure background.
+- [Midnight documentation, pinned revision](https://github.com/midnightntwrk/midnight-docs/tree/c628ffa243e140fee05b945d94ba79976654e5f6) — Compact background.
 
 ## Acknowledgements
 

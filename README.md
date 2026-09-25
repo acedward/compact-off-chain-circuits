@@ -2,34 +2,34 @@
 
 ## Summary
 
-This repository contains a Draft MIP and a reference implementation for
-discovering, verifying, and locally evaluating Compact public-state interfaces.
+This repository contains a Draft MIP for publishing and verifying Compact
+interface artifacts, plus a reference implementation that can also evaluate
+operations locally.
 A contract emits an event identifying a bundle commitment and retrieval
 location.
 A consumer can then check the committed files, compare published verifier keys
 with named installed operations, and reproduce the generated artifacts.
 
-The [MIP methodology](MIP-SPEC-DRAFT.md) makes three separate conditions
-explicit:
+The [MIP methodology](MIP-SPEC-DRAFT.md) defines three cumulative levels:
 
-1. Cumulative Levels 1–3 establish bundle integrity, same-name installed-key
-   equality, and source-based artifact reproduction.
-2. Read eligibility excludes witnesses, effects, and unsupported execution
-   context.
-3. Compilation and execution require real host confinement.
+1. Level 1 matches published files with the on-chain event commitment.
+2. Level 2 matches every published verifier key with its same-named installed
+   verifier key at the identified state.
+3. Level 3 reproduces keys, generated JavaScript including its operation
+   instructions, and supporting artifacts from source using the disclosed
+   build inputs.
 
-The MIP does not standardize a wire format, bundle schema, toolchain, or command
-line. This repository provides one concrete prototype. It demonstrates useful
-versions of Levels 1–3, but it does not yet establish complete effect/context
-eligibility, secure host confinement, or a cryptographically authenticated
-common event/state snapshot. Its `L1`, `L2`, and `L3` output describes the
-checks it currently performs, not full conformance with the methodology.
+The MIP names the `[v1]` commitment profile and the artifact-verification
+workflow; it does not define this repository's full wire schema, toolchain, or
+command line. The prototype's `L1`, `L2`, and `L3` output describes its concrete
+checks, not universal format conformance. Invocation and local execution are
+prototype features outside the MIP.
 
 An interface can be open or partial-source:
 
 - An open interface imports and therefore publishes the contract module.
-- A partial-source interface publishes only the selected reads and enough
-  ledger layout to reproduce their generated artifacts.
+- A partial-source interface publishes only the selected named operations and
+  enough ledger layout to reproduce their generated artifacts.
 
 Neither form authenticates original ledger field names. Those names are source
 labels and can change while keys remain equal. Pure circuits also have no
@@ -62,6 +62,8 @@ MIT; see [NOTICE](NOTICE).
 Use `compact/OffChainInterface.compact` and the bundle assembler
 `src/deployer.mjs` (`coc-deploy-check`). These steps document this repository's
 format; the MIP is authoritative for the methodology and guarantee labels.
+The invocation examples and safety cautions later in this README describe
+prototype behavior outside the MIP's artifact-verification endpoint.
 
 1. Import the publisher module and expose its event circuit:
 
@@ -121,8 +123,8 @@ format; the MIP is authoritative for the methodology and guarantee labels.
 
    The prototype compares the interface keys with the local full build, writes
    the bundle, and prints the index URI, commitment, and 256-byte payload. This
-   does not compare against live installed state and does not establish the
-   methodology's read-eligibility conditions.
+   does not compare against live installed state and therefore does not itself
+   establish Level 2.
 
 5. Host the exact bundle bytes. Keep every published version immutable.
 
@@ -189,19 +191,19 @@ Its current stages are:
   package/compiler metadata.
 - Level 2 compares shipped keys with named installed operations and checks the
   generated `expectedVk` table when present. It does not authenticate arbitrary
-  wrapper behavior. At Level 2 the executed wrapper is the entry writer's code.
+  wrapper behavior.
 - Level 3 rebuilds and compares keys, `index.js`, and `contract-info.json`.
   Only Level 3 ties the code to reproduced source and artifacts under the
   selected compiler; it still does not prove unique original source, original
-  ledger names, eligibility, or host safety.
+  ledger names, or that generated JavaScript is deployed on chain.
 
 Use `--bundle <dir>` for a local bundle or `--bundle-url <url>` for another
 retrieval source. `--event-payload <hex> --state <hex-or-file>` supplies offline
 inputs. Such inputs are caller assertions unless separately bound to an
 authenticated network/address/event/state record.
 
-The prototype can invoke an operation with `--circuit <name> --args ...`, but
-this execution is not yet a conforming public read:
+Execution is outside the MIP. The prototype can invoke an operation with
+`--circuit <name> --args ...`; when using that separate feature:
 
 - at Level 2 the publisher's wrapper remains trusted;
 - the prototype has no complete effect/context eligibility monitor;
@@ -256,7 +258,8 @@ network, event, state, and observation limitations.
 
 ## Spec
 
-The [MIP](MIP-SPEC-DRAFT.md) defines the high-level publication, verification,
-and local-read methodology and the meaning of its guarantees. This README is an
-operator guide for one implementation's formats, tools, and commands; those
-details are not universal methodology requirements.
+The [MIP](MIP-SPEC-DRAFT.md) defines publication and artifact verification
+through reproduced compiler output for named operations. It stops before code
+invocation. This README is an operator guide for one implementation's formats,
+tools, commands, and optional execution features; those details are not
+universal methodology requirements.

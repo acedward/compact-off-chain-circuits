@@ -28,245 +28,1135 @@ License: Apache-2.0
  limitations under the License.
 -->
 
-<!--
- Outline of the MIP document for this standard, in the format of
- midnightntwrk/midnight-improvement-proposals (mips/mip-template.md, MIP-0001).
- Each bullet is a key point its section will expand.
--->
-
 ## Abstract
 
-<!-- About 200 words. -->
+This MIP defines how a Midnight contract publishes a discoverable Compact
+interface for local public-state reads. A MIP-0002 event commits to a bundle of
+source, verifier keys, generated code, and compiler metadata. Consumers can
+check the committed bytes (Level 1), compare named verifier keys with installed
+contract operations (Level 2), and reproduce executable artifacts with a
+trusted compiler (Level 3).
 
-- Verifiable off-chain reads: a contract publishes a small bundle holding its read circuits; anyone runs them locally against current state, with no transaction and no proof.
-- One MIP-0002 `Misc` event commits the contract to the bundle: a 32-byte commitment and the URI of its `index.json`. One interface per contract; the newest event wins.
-- Three levels: the files are the committed ones (Level 1); the `.verifier` files are the on-chain keys (Level 2); the source rebuilds to them (Level 3).
-- Open or private interfaces; both compile to the deployed keys.
-- Kilobytes, not the full compiled output: verifier keys only, never prover keys or ZKIR.
+Artifact verification, read eligibility, and host confinement are separate
+properties. A verified bundle can contain code that is not an eligible read,
+and verified code is not thereby safe to execute with ambient host authority.
+A successful local read produces neither a proof nor a transaction and is
+meaningful only for the identified state, toolchain, and execution profile.
 
 ## Motivation
 
 ### The problem
 
-- Reading a contract meaningfully means running its circuits (`balanceOf`, `tokenURI`), not decoding raw state.
-- Today a reader needs the dApp's full compiled output (MPS-0039: 384 MB for ten test contracts) or has to trust the dApp's own code.
-- Nothing leads from an address to its interface, or proves that locally run code is the deployed code.
+Raw contract state and installed verifier keys do not tell a wallet, explorer,
+or application how to present a value such as `balanceOf` or `tokenURI`.
+Generated wrappers can perform that interpretation, but a consumer needs a way
+to find the correct artifacts and distinguish a publisher's claim from bytes
+that reproduce the installed operations.
 
-### Why existing capabilities do not solve it
+### Existing capabilities and remaining gaps
 
-- `contract-info.json` carries only the surface (MPS-0022).
-- midnight-js compares keys you already hold, but says nothing about where to get them or which source they come from (MPS-0036, MPS-0039).
+Compact compiler metadata describes a contract surface, and Midnight tooling
+can compare a verifier key already held by a consumer with an installed key.
+Those capabilities do not provide address-based discovery, committed artifact
+distribution, source reproduction, read eligibility, or safe execution. The
+MPS-0022, MPS-0036, and MPS-0039 problem statements motivate parts of this
+work; they are informative and do not replace this specification.
 
-### Why reads first
+### Why public-state reads
 
-- A read needs no proof and no transaction: verifier keys (1,351 bytes each) and the generated wrapper are enough.
-- Writes need proving material and witnesses: left to MPS-0039's other recommended MIPs.
+This first profile covers computations from an identified public contract
+state and exactly typed public arguments. It excludes witnesses, private state,
+state changes, events, asset operations, cross-contract calls, and dependence
+on an unspecified caller, address, wallet, or clock. This boundary matters:
+the prototype has accepted a witness-free circuit that writes simulated state,
+and has evaluated `kernel.self()` with a dummy zero address. Neither result is
+a conforming public read.
 
 ## Specification
 
-The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be interpreted as described in RFC 2119.
+The words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** use the
+meanings in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119); their uppercase
+form follows [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174).
 
-### Scope
+This section and Appendix B are normative. This section controls processing and
+validation; Appendix B controls the literal outputs for its listed inputs. A
+conflict within either domain is a specification defect: an implementation MUST
+report the version unsupported rather than select a convenient interpretation.
+Other sections are informative.
 
-- Normative: [1] to [10], and the test vectors of Appendix B.
-- Informative: the other appendices and the reference implementation.
+### Scope, roles and terminology
 
-### Terminology
+A **publisher** prepares a **bundle** and causes a recognized publication event
+to be applied. A **consumer** discovers, retrieves, verifies, and optionally
+executes it. An **event/state provider** supplies ordered events and public
+state. A **maintenance authority** is the contract-specific authority, if any,
+that can change installed operation keys or restrict publication. This MIP does
+not create that authority.
 
-- Interface, bundle, index, commitment, published circuit, entry point, `.verifier` file, open and private interface, publisher, consumer, Levels 1 to 3.
+A **publication** is an applied recognized event, identified by network,
+emitting contract, canonical event order, commitment, and URI. An **installed
+operation** is a contract operation name and verifier key present in the
+identified state. A **verification level** is one of the three checks below.
+An **eligible read** is an installed operation whose execution, for the selected
+state and arguments, satisfies the effect and context rules below.
 
-### 1. The event
+A conforming publisher MUST implement the event, bundle, and lifecycle rules.
+A conforming consumer MUST implement strict parsing, discovery, verification,
+reporting, eligibility, and confinement rules for every capability it claims.
+An event/state provider claiming support MUST state its network identity,
+ordering, pagination, completeness, finality, and common-snapshot guarantees.
+Publishers and consumers claiming v1 encoding conformance MUST reproduce the
+applicable Appendix B vectors and rejection outcomes.
 
-- `publishBundle(payload: Bytes<256>)` emits `Misc { name: pad(32, "mip-xxxx:public-interface[v1]"), payload }`.
-- The name keeps `mip-xxxx` until the MIP editors assign a number.
-- The name's exact bytes; consumers ignore any other name or version.
-- Naming follows MIP-0018: lowercase, colon namespace, bracketed version.
-- The emitting address is the provenance; the newest event wins.
-- Constructors cannot emit: publish after deployment, one transaction per version.
+This profile does not specify writes, transaction simulation, proof generation,
+private-input reads, a language-independent ABI, publisher selection policy, or
+artifact hosting availability.
 
-### 2. Payload layout
+### Target and dependency matrix
 
-- Bytes 0 to 31: the commitment.
-- Bytes 32 to 255: the UTF-8 URI of `index.json`, zero padded (224 bytes at most).
-- `https` is the baseline every consumer fetches. A publisher MAY opt in to a content-addressed store by using its URI, for example `ipfs://`; a consumer that cannot fetch that scheme gets the files another way (a gateway, a local copy). The commitment checks the content whatever its source.
-- The caller assembles the payload, because Compact has no byte concatenation.
+| Layer | Profile target | Evidence in this Draft | Required capability |
+|---|---|---|---|
+| Network | identified Midnight network, not a human label alone | Stagenet genesis observed on 2026-09-25 | immutable network identity in reports |
+| Node / consensus | no protocol or consensus change | Stagenet node `2.0.0-d9729c13` observed on 2026-09-25 | state/event anchors when claimed by provider |
+| Ledger | Midnight 2.x, Ledger v9 | Stagenet observation dated 2026-09-25 | MIP-0002 `Misc` events and installed operations |
+| Proof system / wallet | existing publication transaction only; not applicable to local read execution | deployment tooling exercised separately | no proof or wallet input for a local read |
+| Compact | compiler 0.34.0; language 0.26.0 | historical bundle reproduced with compiler revision `1f671fc27818df2b2676b3a97f85b2b821756243` | compile source, keys, JS, typings, and `contract-info.json` |
+| Runtime | `@midnight-ntwrk/compact-runtime` 0.19.0 | reference implementation pin | deserialize public state and evaluate generated code |
+| Event/state service | API v4 capability used by the reference implementation | public Stagenet service observed; API is beta | ordered pagination plus contract state |
+| Contract/proving artifacts | publisher operation plus interface bundle; publication proving material excluded from bundle | reference publisher at baseline commit | emit event; expose installed keys/state |
+| Commitment | SHA-256, BLAKE2s-256 Sapling GroupHash, Jubjub | `@noble/curves` 2.4.0 vectors | Appendix B |
+| Execution confinement | implementation-defined mechanism meeting the rules below | evidence pending | deny undeclared host access and enforce resource limits |
+| Eligibility monitor | complete effect/context observation or sound analysis | not implemented by the prototype | required before reporting a successful public read |
 
-### 3. The bundle
+The only compiler-flag states in this profile are absent and the exact singleton
+array `["--feature-zkir-v3"]`; absence is distinct from use of that flag. A
+publisher MUST list all user source and
+imports. A Level 3 consumer MUST supply the standard library from its
+independently trusted compiler installation, not from the bundle. A network
+name or compatible version string alone does not establish these capabilities.
 
-- The interface source and its imports (`src/`), one `out/keys/<circuit>.verifier` per published circuit, `out/contract/index.js` and its typings, `contract-info.json`, `package.json` (compiler, language, runtime, interface path, flags), and a README.
-- Never prover keys or ZKIR.
-- Paths resolve relative to the index URI; the folder is hosted as is.
+### Publication event and payload
 
-### 4. index.json
+The experimental event name is exactly 32 bytes:
 
-- Exact fields and order: `bundle`, `commitment` (the scheme id), `hash`, `compiler`, `files`. The only optional field is `compiler.flags`.
-- `hash` is the commitment, for a fail-fast check. `compiler` repeats `package.json`. The commitment covers neither, so both are checked, never trusted.
-- Path rules, and a sha256 and size for each entry.
+```
+ASCII("mip-xxxx:public-interface[v1]") || 0x000000
+```
 
-### 5. The commitment
+It is provisional until editors assign a MIP number. A producer MUST NOT emit a
+numbered name by silently substituting digits into this Draft constant.
 
-- A JubJub multiset hash: the sum of FindGroupHash(sha256(path) ‖ sha256(file), "COC_B_v1"), encoded in 32 bytes.
-- It MUST reproduce Zcash's Sapling generator. Order-independent. Test vectors in Appendix B.
+A publishing contract MUST expose an installed operation with Compact signature
+`publishBundle(payload: Bytes<256>): []`, or an application-authorized wrapper
+with that signature. A successful call MUST emit exactly one MIP-0002 `Misc`
+event carrying the fixed name and the supplied 256-byte payload. The operation
+MUST NOT reinterpret or modify payload bytes. Publication occurs in an ordinary
+post-deployment transaction because the target constructors do not emit this
+event.
 
-### 6. Open and private interfaces
+The MIP-0002 `Misc` payload is exactly 256 bytes:
 
-- A key depends on circuit logic, statement order included, and on the positions and types of the fields it reads. Names are erased.
-- Open: import the deployed module. Private: declare the ledger in the deployed order and types, under any names, with only the published circuits.
-- What may and may not change; entry point names are kept; the 15-field rule.
+| Offset | Length | Meaning |
+|---:|---:|---|
+| 0 | 32 | encoded bundle commitment |
+| 32 | 1..224 | nonempty absolute RFC 3986 URI in ASCII bytes (and therefore valid UTF-8) |
+| remaining | 0..223 | zero padding through byte 255 |
 
-### 7. Verification
+A consumer MUST ignore events with another name. For the recognized name it
+MUST reject a payload of another length, invalid UTF-8, an embedded zero byte,
+an empty or relative URI, a raw non-ASCII character, or any nonzero byte after
+padding begins. Non-ASCII resource-name octets MUST be percent-encoded. A
+consumer MUST preserve the encoded URI bytes and MUST NOT apply Unicode or URI
+normalization before recording publication identity. It MUST remove only
+trailing zero padding. `https` retrieval is the mandatory baseline;
+a syntactically valid unsupported scheme produces `unsupported transport`, not
+an invalid publication. The URI MUST have no fragment component. If its parsed
+path component ends in a literal `/`, the consumer MUST resolve the relative
+reference `index.json` under RFC 3986 section 5 to obtain the index URI;
+otherwise the publication URI itself is the index URI. Resolving that relative
+path discards a base query, while a query on a direct index URI is retained for
+the index request.
 
-- Level 1: `hash` against the event first, then the entries, the files and the compiler.
-- Level 2: the client's four steps; no compiler.
-- Level 3: recompile only listed files, without `COMPACT_PATH`; reproduce the keys, `index.js` and `contract-info.json`. The compiler version is advisory.
-- The order, and stop at the first failure.
+### Bundle, index and retrieval
 
-### 8. Executing a read
+A bundle MUST include:
 
-- Only after the requested levels pass, and only circuits whose key passed Level 2. Witness and pure circuits are refused.
-- Exact argument encodings; a separate process; no transaction, no proof.
+- the interface source and every user import under `src/`;
+- one `out/keys/<operation>.verifier` for each published installed operation;
+- generated `out/contract/index.js` and its typings;
+- the v1 module marker at `out/contract/package.json`;
+- `out/compiler/contract-info.json`;
+- `package.json`, naming compiler, language, runtime, interface entry, and
+  compiler flags; and
+- a README describing the interface.
 
-### 9. Publication and maintenance
+It MUST omit prover keys and ZKIR. It MUST NOT rely on a bundled compiler,
+runtime, or package install hook as a trusted input; a consumer MUST NOT execute
+bundle installation hooks. Documentation and other non-proving artifacts MAY be
+included when listed and committed, but do not become trusted tooling.
 
-- Who may publish is the contract's choice (an optional check, informative).
-- Publish again after any change to a published circuit's key.
-- Keep the hosted folder byte-identical; mirrors may serve the same bytes.
+The required compiler-artifact paths are `out/contract/index.js`,
+`out/contract/index.d.ts`, and `out/compiler/contract-info.json`. The module
+marker is profile-owned metadata, not compiler output: its file MUST contain
+exactly the 21 bytes `{ "type": "module" }` followed by LF, hexadecimal
+`7b202274797065223a20226d6f64756c6522207d0a`. At least one key MUST appear at
+`out/keys/<operation>.verifier`. The interface entry and all its user imports
+MUST appear under `src/`.
 
-### 10. Versioning
+All JSON processed by this profile MUST follow RFC 8259 from UTF-8 bytes with
+no byte-order mark. A string MUST decode to Unicode scalar values; an unpaired
+UTF-16 surrogate escape rejects. Member names are compared after JSON escape
+and surrogate-pair decoding, code point for code point and without Unicode
+normalization; duplicate decoded names reject. Consumers MUST retain number
+values without binary floating-point rounding when a rule compares them.
 
-- The event name's `[v1]`, `bundle: "v1"`, the commitment scheme id and its personalization.
-- A new layout gets a new name, never a reinterpretation.
+The root `package.json` MUST contain a `compact` object with exactly these
+profile members:
 
-### Out of scope
+```json
+{
+  "compact": {
+    "compiler": "0.34.0",
+    "language": "0.26.0",
+    "runtime": "0.19.0",
+    "interface": "src/Interface.compact",
+    "flags": ["--feature-zkir-v3"]
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.19.0"
+  }
+}
+```
 
-- Write calls and distributing proving material (MPS-0039).
-- Witness-dependent circuits.
-- A language-agnostic representation (MPS-0022); a later bundle version can carry it.
-- Which publisher to trust.
-- Security-review evidence (MPS-0036).
-- Hosting.
+`compact.flags` is optional; if present, it MUST equal the singleton array
+`["--feature-zkir-v3"]`. An empty or repeated flag array rejects. The four other
+`compact` members are required
+strings. `interface` MUST satisfy the path rules, name a listed `.compact` file
+under `src/`, and be used as the Level 3 compiler entry. `dependencies` MUST pin
+`@midnight-ntwrk/compact-runtime` to the same exact version as
+`compact.runtime`. Other ordinary package metadata MAY occur, but it neither
+changes the profile nor authorizes install hooks. The index `compiler` value
+MUST equal `compact.compiler` and `compact.flags` exactly.
+
+The tested baseline triple is compiler `0.34.0`, language `0.26.0`, and runtime
+`0.19.0`. A consumer MAY declare another exact triple supported only if it can
+apply every rule in this execution profile and the full Level 3 artifact
+comparison succeeds. Version proximity or a successful parse is not evidence of
+compatibility; otherwise the outcome is `unsupported profile`.
+
+`index.json` is a strict JSON object with this schema:
+
+```json
+{
+  "bundle": "v1",
+  "commitment": "ecmh-jubjub-grouphash",
+  "hash": "<64 lowercase hexadecimal digits>",
+  "compiler": {
+    "name": "compactc",
+    "version": "<decimal x.y.z>",
+    "flags": ["--feature-zkir-v3"]
+  },
+  "files": [
+    { "path": "src/Interface.compact", "sha256": "<64 lowercase hexadecimal digits>", "size": 1 }
+  ]
+}
+```
+
+`compiler.flags` is optional; when present it MUST equal the singleton array
+`["--feature-zkir-v3"]`. Empty, repeated, or other flags reject. All other shown
+members are required. A compiler version has exactly three dot-separated
+nonnegative decimal integers, without leading zeroes except the value `0`. A v1
+consumer MUST reject unknown members at the top
+level, in `compiler`, or in a file entry. JSON object-member order and `files`
+array order have no meaning.
+
+Each `size` token MUST match `0|[1-9][0-9]*`, and its mathematical value MUST be
+in `[0, 2^53 - 1]`; signs, a fraction, or an exponent reject even when their
+value is an integer. Each path MUST be a nonempty, relative POSIX path. Every
+segment MUST contain only bytes `0x21..0x7e` and
+MUST NOT be empty, `.`, `..`, or `node_modules`. A path MUST NOT contain `\`,
+MUST NOT be the root `index.json`, and MUST NOT duplicate another path. No path
+may be both a file and a parent directory of another entry. Paths are hashed as
+their exact UTF-8 bytes and MUST NOT be normalized. A consumer on a filesystem
+that cannot preserve all names distinctly MUST report `unsupported filesystem`.
+
+After fetching the index, a consumer MUST validate its shape and compare
+`hash` with the event commitment before fetching another bundle file. It MUST
+resolve each path relative to the directory of the index URI. Within each path
+segment it MUST preserve only RFC 3986 unreserved bytes and percent-encode
+every other byte as `%HH` with uppercase hexadecimal; an existing `%` byte is
+therefore encoded as `%25`. The generated relative reference has no query or
+fragment, so RFC 3986 resolution discards any query on the index URI. It MUST
+fetch only indexed files and materialize them in a fresh confined location.
+For a local-directory transport it MUST reject symbolic-link path components,
+symbolic-link entries, devices, sockets, and other non-regular files rather
+than read outside the selected root.
+It MUST apply configured per-file, aggregate-byte, redirect, destination, and
+deadline policies on every hop and MUST send no ambient credentials or cookies.
+For unattended remote retrieval, the default destination policy MUST exclude
+loopback, link-local, and private destinations after name resolution and at
+every redirect; an operator can use an explicit narrower allowlist. Policy
+refusal or exhaustion is `unchecked: resource policy`, not evidence that
+committed content is invalid.
+
+`index.json` is not an entry. Consequently its `hash`, `compiler`, and file
+sizes are not separate commitment inputs. Level 1 binds `hash` to the event,
+binds file paths and SHA-256 values through the commitment, checks sizes against
+received bytes, and checks `compiler` against the committed `package.json`.
+
+### Bundle commitment
+
+For each index entry with path `p` and file digest `d = SHA256(file_bytes)`, let
+
+```
+m(p,d) = SHA256(UTF8(p)) || d
+P(p,d) = FindGroupHash(m(p,d), ASCII("COC_B_v1"))
+C      = identity + sum(P(p,d))
+```
+
+SHA-256 is as specified by FIPS 180-4. `COC_B_v1` is exactly eight ASCII bytes.
+The sum is Jubjub addition and is independent of entry order. A conforming
+bundle MUST contain at least one installed-operation key even though the group
+identity has a valid encoding.
+
+Jubjub is the twisted Edwards curve
+`-x^2 + y^2 = 1 + d*x^2*y^2` over the field:
+
+```
+p = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
+d = 0x2a9318e74bfa2b48f5fd9207e6bd7fd4292d7f6d37579d2601065fd6d6343eb1
+r = 0x0e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7
+h = 8
+```
+
+`FindGroupHash(m, personalization)` is the Sapling procedure:
+
+1. For counter `i` from 0 through 255, form `tag = m || uint8(i)`.
+2. Compute BLAKE2s-256 with the supplied eight-byte personalization over the
+   64 ASCII bytes
+   `096b36a5804bfacef1691e173c366a47ff5ba84a44f26ddd7e8d9f79d5b42df0`
+   followed by `tag`.
+3. Interpret the digest as the compressed Jubjub representation below. If it
+   does not decode to a curve point, continue.
+4. Multiply the decoded point by the cofactor 8. If the result is the identity,
+   continue; otherwise return it. If all counters fail, reject.
+
+The 32-byte point representation stores `y` in little-endian form in the low
+255 bits and `x mod 2` in the high bit. Decoders MUST reject noncanonical field
+elements and encodings that do not yield the indicated curve point.
+
+This construction assumes collision resistance of SHA-256/BLAKE2s, correct
+hash-to-group decoding, and unknown discrete-log relationships among entry
+points. Its use as an additive multiset commitment has not received an
+independent cryptographic proof or review for this protocol; matching Appendix
+B is interoperability evidence, not such a review.
+
+### Open and partial-source interfaces
+
+An open interface publishes the imported contract module and wrapper reads. A
+partial-source interface declares enough ledger layout and read logic to
+reproduce published artifacts while omitting unrelated circuit bodies. Both
+forms MUST reproduce the complete published key set and executable artifacts
+at Level 3; “partial-source” is not a weaker verification level.
+
+Compiler 0.34.0 tests show that some identifier, assertion-message, and layout-
+preserving source changes can retain a key. A publisher MUST use reproduction,
+not an assumed transformation list, as the acceptance test.
+
+Ledger field names are publisher-provided labels. Key equality can check a
+compiled access to positions and types, but it cannot authenticate the original
+deployed source names or the application meaning suggested by labels such as
+`owner` or `balances`. Installed operation names are different: Level 2 uses
+them as lookup identifiers for the verifier keys stored in contract state.
+
+### Publication, discovery and snapshot lifecycle
+
+Initially a contract has no publication under this event name. A publisher
+prepares and hosts immutable bundle bytes, constructs the payload, submits a
+transaction, and waits until the event is applied and observable. Submission,
+application, observation, and verification are distinct states. An uncertain
+submission MUST be reconciled by transaction/event identity before retrying.
+
+At a stated chain observation, a consumer MUST paginate all events covered by
+the provider's completeness claim, de-duplicate identical event identities,
+and select the newest applied recognized event using canonical source order.
+Service-local sequence IDs MUST be scoped to that service and network. If order
+within a transaction or event completeness cannot be established, the consumer
+MUST report that limitation and MUST NOT claim a globally latest publication.
+
+A newest recognized event that is malformed, unavailable, or unverifiable
+replaces older publications for selection purposes. A consumer MUST report its
+outcome and MUST NOT silently fall back to an older valid event. A reorganization
+invalidates observations and reports that depend on removed or reordered events.
+
+The verification report MUST bind the network genesis or equivalent immutable
+network identity, contract address, event identity/order, observation time,
+and state identity. The state identity MUST include a SHA-256 digest of the exact
+serialized state bytes and, when available, the provider's immutable block/state
+anchor. Events and state SHOULD come from a common immutable snapshot. If the
+provider cannot supply one, the report MUST describe the mixed-snapshot risk.
+Offline payload/state bytes have no network, address, ordering,
+or provenance by themselves; a report using them MUST label those identities as
+caller assertions rather than verified facts.
+
+Event emission proves only that the emitting contract produced the event under
+the event-source trust model. The reference `publishBundle` has no access
+control. Contracts MAY impose authorization, but consumers MUST NOT infer owner
+endorsement from publication alone. Any key change requires Level 2 revalidation
+against the new state. Any commitment, event, state/key set, compiler/runtime,
+or eligibility-profile change invalidates the corresponding cached conclusion.
+
+### Verification
+
+Verification proceeds in order and stops at the first failed prerequisite. No
+bundle code is executed by Levels 1–3.
+
+#### Level 1 — Committed bundle integrity
+
+A Level 1 consumer MUST:
+
+1. strictly parse the payload and index, then compare `index.hash` byte-for-byte
+   with the event commitment before retrieving other files;
+2. recompute the commitment from every exact `(path, sha256)` entry and compare
+   it with both values;
+3. retrieve every entry and compare its exact byte length and SHA-256 digest;
+4. validate the complete committed `package.json` profile: exact `compact`
+   members and value forms, listed interface entry, runtime dependency pin, and
+   permitted flags; then compare compiler version and flags with the index
+   header; and
+5. confirm that all mandatory artifact classes are present and that
+   `out/contract/package.json` has the exact v1 module-marker bytes.
+
+Level 1 establishes integrity relative to the selected event commitment. It
+does not establish publisher authority, availability, freshness, key equality,
+safe execution, or an authentic state/event provider.
+
+#### Level 2 — Installed verifier keys
+
+Operation names in this profile are case-sensitive ASCII strings matching
+`[A-Za-z_$][A-Za-z0-9_$]*`. Each element of the `circuits` array in
+`out/compiler/contract-info.json` MUST be an object whose `name` member is such
+a string, and those names MUST be unique. The name MUST NOT itself contain the
+bounded `expectedVk` text occurrence defined below. For Compact 0.34.0, define
+the keyed set `K` as rows whose `pure` member is exactly `false`
+and whose `proof` member is exactly `true`; define the unkeyed set `U` as rows
+with `pure: true` and `proof: false`. A missing member or another combination is
+an unsupported profile. `K` MUST be nonempty.
+
+Define `S` from listed paths exactly matching
+`out/keys/<name>.verifier`, with `<name>` satisfying that grammar. A direct path
+maps to the same case-sensitive state-operation name; no directory scan,
+decoding, or filename normalization participates. Another path under
+`out/keys/`, or a `.verifier` path elsewhere, rejects. Level 2 requires `S = K`.
+After deserializing the identified state with the pinned runtime, it requires a
+same-named operation with a verifier key for every name in `K` and compares the
+exact key bytes. Other state operations are outside this bundle and do not make
+the sets unequal.
+
+Compact 0.34.0 also requires exactly one LF-delimited table in
+`out/contract/index.js`, extracted as text without evaluating the module:
+
+```text
+export const expectedVk = {
+  '<name>': '<64 lowercase hexadecimal digits>',
+};
+```
+
+The opening and closing lines and each two-space-indented row are literal; each
+name follows the operation grammar and occurs once. For this extraction, an
+`expectedVk` occurrence is those ten exact ASCII bytes with neither adjacent
+byte, when present, an ASCII letter, digit, or underscore; occurrences inside
+comments and strings count. Exactly one such occurrence MUST exist in the whole
+file, at the declaration above. Let `E` be its row-name set. Level 2 requires
+`E = S = K`, and each row value MUST equal lowercase
+`SHA256(exact_verifier_file_bytes)`. A missing, extra, duplicate, malformed, or
+mismatching row fails. This table is only an internal consistency check: a
+publisher can modify a wrapper while retaining genuine keys and recompute the
+bundle commitment.
+
+Level 2 establishes named key equality at the identified state. It does not
+authenticate wrapper behavior, source, original field names, eligibility, or
+the state provider. Executing after only Level 2 requires explicit trust in the
+publisher's committed wrapper and MUST be reported as `publisher-trusted code`.
+
+#### Level 3 — Reproduced source and executable artifacts
+
+After Level 2, a Level 3 consumer MUST use an independently trusted compiler
+installation matching a supported profile. Before invocation it MUST confine
+the compiler to the listed source inputs, trusted standard library, declared
+flags, bounded resources, and no ambient credentials or network. Removing
+`COMPACT_PATH` or examining an import trace only after compilation does not
+satisfy this requirement.
+
+The rebuild MUST reproduce byte-for-byte:
+
+- every shipped verifier key, with its rebuilt name set equal to `K`;
+- `out/contract/index.js` and `out/contract/index.d.ts`; and
+- `out/compiler/contract-info.json`.
+
+The profile-owned module marker is checked at Level 1 and is not claimed as
+compiler output. A rebuilt key missing from `S`, or a shipped key missing from
+the rebuild, fails Level 3.
+
+The report MUST record the actual compiler/runtime and any version mismatch.
+Level 3 establishes artifact reproduction under those trusted tools. It does
+not identify unique original source, prove general semantic equivalence or
+compiler correctness, establish read eligibility, or make execution safe.
+
+#### Verification report and reuse
+
+A report MUST contain: levels attempted and completed; commitment and checked
+artifacts/operations; network, contract, event, state, and observation
+identities or their absence; tool versions and flags; provider and confinement
+assumptions; eligibility status; failure details; and whether code executed.
+The report MUST distinguish `failed`, `unsupported`, `unchecked`, and `passed`.
+
+Level 1 may be reused for identical bundle bytes and commitment. Level 2 may be
+reused only for the same network, contract, and state/key set. Level 3 may be
+reused only for the same commitment, compiler inputs, flags, and trusted
+toolchain. Eligibility and a read result are additionally bound to the selected
+operation, exact arguments, public state, context profile, runtime, and monitor.
+
+#### Verification limits: pure circuits and ledger field names
+
+Names in `U` are reported separately as `unkeyed/unverified`; they MUST NOT
+appear in `S`, `E`, or the rebuilt key set. In this profile such a pure circuit
+has no standalone installed verifier key. It therefore cannot pass Level 2 as
+an installed operation and MUST NOT be reported or executed as an independently
+verified deployed read. Level 3 bundle success does not supply the missing
+on-chain comparison. A pure helper can be covered only as compiled logic inside
+an installed operation whose key is checked.
+
+Levels 1 and 3 can commit and reproduce the labels in published source. No
+level can establish that ledger field labels are the names used in the original
+deployed source. Reports MUST NOT present those labels as authenticated names or
+infer application meaning from them.
+
+### Executing a public read
+
+#### Eligibility and execution context
+
+For the selected state and arguments, an eligible read MUST:
+
+- use an installed operation whose key passed Level 2;
+- require no witness or private-state input;
+- perform no ledger write, even if later restored;
+- emit no event and perform no coin, asset, or cross-contract operation; and
+- read no contract address, caller, coin public key, time, randomness, wallet,
+  network service, or other context outside the selected public state and
+  exactly typed public arguments.
+
+A consumer MUST establish these properties either through sound analysis of
+the complete resolved program for this compiler profile or through a trusted,
+complete runtime trace of all accesses and effects on the executed path. A
+complete trace must cover the public transcript, events, declared effects,
+Zswap/asset operations, private outputs/state, cross-contract calls, and
+semantic context accesses. An observed final-state equality check is
+insufficient. A tracing consumer MAY
+invoke the operation provisionally inside the required confinement, but MUST
+buffer/discard every effect and MUST discard the result if the trace records a
+forbidden access or effect. It then reports `ineligible operation`, even if the
+operation also returns or asserts. If neither mechanism is available, the
+consumer MAY complete Levels 1–3 but MUST report `eligibility unestablished`
+and MUST NOT report or execute a verified public read.
+
+The observable Draft predicate and mandatory refusal are defined above, but this
+Draft does not yet standardize one complete analyzer or trace schema by which
+independent consumers can establish it. That concrete mechanism is a Proposed-
+readiness gate. The reference implementation checks for witnesses and keys but
+has no complete effect/context monitor; an implemented and validated mechanism
+is a separate Implemented-stage gate. Supplying dummy values for unsupported
+context is never a conforming substitute.
+
+#### Arguments, results and execution boundary
+
+The operation signature in reproduced `contract-info.json` controls arguments.
+Consumers MUST reject missing/extra arguments, truncation, padding, floating-
+point conversion, and values outside the declared type:
+
+- `Bytes<N>` is exactly N bytes;
+- `Uint` is an integer from zero through its exact declared maximum;
+- `Field` is an integer from zero through
+  `52435875175126190479447740508185965837690552500527637822603658699938581184512`;
+- `Boolean` is exactly true or false;
+- vectors, structs, `Either`, and `Maybe` preserve their compiler-declared
+  shape and tags; and
+- opaque values use the generated profile type without coercion.
+
+A textual API MAY accept `0x` plus exactly `2N` hexadecimal digits for bytes
+and decimal ASCII for integers, but it MUST NOT change the value model above.
+Results MUST retain their generated type and exact integer/byte values. A report
+may render bytes as lowercase hexadecimal and integers as decimal.
+
+Before loading generated code, the consumer MUST isolate it from ambient
+credentials, network, host processes, and filesystem paths other than the
+verified bundle copy and trusted runtime. It MUST bound CPU time, memory, child
+processes, and output, and MUST resolve runtime imports only from its
+independently trusted installation. A fresh child process with the consumer's
+full privileges is not confinement.
+
+Level 2 execution, if local policy permits it, MUST be marked publisher-trusted.
+Level 3 execution may be marked source-reproduced. Neither label implies
+eligibility or host confinement. A successful result is a local computation at
+the reported state; it is not a proof, transaction, transaction simulation,
+future-state prediction, or guarantee that a later transaction would succeed.
+
+### Outcomes and failure behavior
+
+| Condition | Required outcome | Code execution |
+|---|---|---|
+| no recognized event | `no publication` | no |
+| recognized malformed payload/index/file | `invalid publication`, with failed check | no |
+| newest bundle unavailable | `unavailable publication`; no older fallback | no |
+| unsupported version/scheme/filesystem/profile | `unsupported` | no |
+| deadline, size, or local policy refusal | `unchecked: resource policy` | no |
+| Level 1, 2, or 3 mismatch | `verification failed` at that level | no |
+| valid artifacts but no eligibility mechanism | `eligibility unestablished` | no verified read |
+| complete trace observes forbidden context/effect | `ineligible operation`; discard result/effects | provisional, confined |
+| invalid arguments | `invalid input` | no circuit invocation |
+| circuit assertion | `read rejected by circuit` | yes, confined |
+| compiler/runtime/internal fault | `tool fault`, distinct from assertion | no successful result |
+| all requested checks, eligibility, and execution pass | `successful public read` with typed result and identities | yes, confined |
+
+CLI exit codes are implementation-specific mappings and are not protocol
+identifiers.
+
+### Privacy and disclosure
+
+| Data | Observers and sink | Remaining exposure |
+|---|---|---|
+| event commitment and URI | ledger peers, indexers, consumers | publication timing and contract linkage are public |
+| publication transaction inputs/metadata | publisher wallet, proof service when used, ledger peers | wallet/account, proof-service, fee, and timing exposure follows the deployment transaction flow |
+| indexed bundle and source | host and fetchers | an open interface reveals imported bodies; partial source omits only unlisted bodies |
+| state layout, operation names, keys | ledger/state provider and consumers | labels are not authenticated original names |
+| fetch request | host, gateway, network intermediaries | consumer interest, address, timing, and size may be correlated |
+| arguments and local result | executing consumer; any API/UI/telemetry it uses | this profile supplies no encryption or recipient control |
+| diagnostics | consumer logs/UI | assertion text and failures may reveal publisher-chosen data |
+
+Local read execution accepts only public state and public arguments, contacts no
+proof service, and produces no zero-knowledge proof. Publishing the event is a
+separate ordinary proved chain transaction and can involve wallet/proof-service
+observers under the deployment's transaction flow. `disclose()` in source is
+compiler permission for a data flow, not delivery, encryption, authorization,
+or a privacy guarantee. Partial-source publication does not make ledger state,
+layout, keys, URI, arguments, results, or access metadata confidential.
+
+### Versioning and maintenance rules
+
+`[v1]` versions the event/payload, `bundle: "v1"` versions the index schema,
+and `ecmh-jubjub-grouphash` plus `COC_B_v1` identify the commitment. A change to
+their byte semantics, eligibility/context model, or required artifact relation
+requires a new version and, when material, a superseding MIP. Clarifications
+that do not change accepted bytes or outcomes may be errata.
+
+Unknown event names are ignored. Unknown required schema/profile versions are
+unsupported and MUST NOT be interpreted as v1. After number assignment,
+publishers must emit a separately specified numbered name; experimental events
+remain experimental and are not reinterpreted. Hosted bundle bytes SHOULD
+remain immutable for as long as publications or audit records refer to them.
+
+The MIP editors own normative errata and status changes. Implementers own their
+version support and conformance records. A new compiler generation, ledger
+model, security finding, broken dependency, or retired network triggers review
+of this profile and its vectors.
 
 ## Rationale
 
-- Why an event, not contract state: no ledger slot, so existing keys stay unchanged, and existing contracts can adopt it later.
-- Why one interface per contract, with the newest event winning.
-- Why a commitment plus a URI, not the content on chain.
-- Why a JubJub multiset group hash: order-independent, binding, and not Poseidon, which a hard fork may change.
-- Why `hash` and `compiler` in `index.json`.
-- Why three levels: Level 2 needs no compiler; Level 3 is a reproducible build.
-- Why verifier keys only; why private interfaces; why the JS wrapper for now.
-- Why refuse witness and pure circuits; why a separate process.
-- Alternatives considered, all rejected:
-  - **Data on the ledger** (the interface in contract state): a bundle (79 to 122 KB) is more than one block may write (50,000 bytes on Stagenet), and every byte stays in state.
-  - **Data in events** (the files themselves in `Misc` payloads): at 256 bytes per payload, a bundle takes hundreds of events, each metered, for consumers to reassemble.
-  - **A centralized off-chain registry**: a party everyone must trust and keep online, and a single point of censorship. The on-chain commitment makes any host acceptable instead.
-  - **A data-availability layer as a requirement**: every consumer would depend on that layer. A publisher may still opt in by pointing the URI at a content-addressed store such as IPFS [2].
+### Discovery and distribution alternatives
+
+No change leaves consumers dependent on dApp-specific artifact delivery. A
+central registry simplifies lookup but introduces a separate authority and
+availability dependency. Storing the full interface in contract state or
+events increases permanent or metered ledger data. This design uses one event
+as address-bound discovery and keeps artifacts off chain; ordinary HTTPS is
+widely deployable, while content-addressed mirrors remain possible without
+changing committed bytes. Hosts can still censor or observe fetches, and event
+provenance is not owner authorization.
+
+### Commitment and verification design
+
+The commitment binds path/content pairs without a canonical file order and can
+be updated by point addition. The index duplicates the commitment for an early
+comparison and records compiler metadata that is checked through the committed
+package. Three levels allow integrity and key checking without a compiler, then
+exact artifact reproduction when one is available. These operational benefits
+do not substitute for independent review of the additive construction or the
+compiler relation.
+
+Verifier-key-only distribution avoids prover material. Partial-source bundles
+can omit unrelated logic, but cannot hide public layout or prove that supplied
+field labels are original. Level 2 remains useful for byte equality while its
+wrapper is explicitly publisher-trusted.
+
+### Read scope and executable artifacts
+
+The narrow public-state/context-independent scope makes a local result
+describable without pretending to simulate a transaction. Witness absence alone
+does not exclude writes or context reads, and exact artifacts do not confine
+host code. For that reason verification, eligibility, and confinement are
+independent gates. Pure circuits are excluded because this profile has no
+installed key against which to authenticate them.
 
 ## Path to Active
 
 ### Acceptance Criteria
 
-- An independent consumer (explorer, wallet or indexer) verifies to at least Level 2.
-- A second verifier implementation, ideally not in JS, passes the test vectors.
-- A contract not by the authors publishes an interface on a public network.
-- The module is available in a library, for example OpenZeppelin Compact Contracts.
-- Review with MPS-0039's authors on the interface-artifact boundary.
+| Stage gate | Owner | Required evidence | Current disposition |
+|---|---|---|---|
+| Proposed-ready constants and semantics | author and MIP editors | assigned name; complete vectors; one fully specified interoperable eligibility mechanism | Draft predicate/refusal resolved; experimental name and concrete mechanism semantics pending |
+| Independent commitment review | cryptographic reviewer | review of additive construction, parameters, assumptions, and vectors | evidence pending |
+| Compiler/artifact relation review | compiler/toolchain reviewer independent of the reference author | reproduce the pinned metadata classification, key/`expectedVk`/artifact set relations, and erased-name limits from compiler outputs and counterexamples; record no untracked relation | evidence pending |
+| Independent interoperability | test coordinator | independent producer and consumer agree on positive/negative corpus | evidence pending |
+| Accepted | MIP editors under MIP-0001 | recorded review, vote, and resolution of blockers | editor action pending |
+| Implemented | component maintainers | pinned releases; publisher/consumer requirement mapping; validated confinement and eligibility mechanism; deviations resolved | mechanism unimplemented/unvalidated; prototype has known deviations |
+| Consumer integration | wallet/explorer/library maintainer | identified external consumer runs conformance corpus | evidence pending |
+| Active | network/release owner | named network identity, activation/support record, monitoring and incident route | no activation claim |
+
+Numbering or accepting this Draft does not satisfy implementation or activation
+gates. The compiler review passes only when its independent reviewer records all
+listed relations and finds no unsupported compiler-dependent claim. Any failed
+gate keeps the MIP at its prior stage and requires remediation, scope reduction,
+or a superseding version before advancement.
 
 ### Implementation Plan
 
-1. Reference module, deployer check and verifier (exist).
-2. Reference deployment: done on Stagenet; redo under the numbered name; Preprod once events are available there.
-3. Explorer integration and library proposals.
-4. Published test vectors.
-5. Follow-up: a bundle version carrying the MPS-0022 representation.
+1. Complete strict decoding, snapshot reporting, eligibility, confinement, and
+   failure classification in the reference consumer.
+2. Publish an independent vector consumer and differential corpus.
+3. Obtain separate commitment and compiler/artifact-relation reviews and resolve
+   their findings.
+4. Integrate the profile into at least one independently maintained consumer or
+   library.
+5. After number assignment, publish under the assigned namespace and retain an
+   identified network conformance record with an incident/rollback route.
 
 ## Backwards Compatibility Assessment
 
-- No protocol, compiler or indexer change: a convention over MIP-0002 `Misc`.
-- Contracts without `publishBundle` are unaffected; ledger v9 contracts can add it through their maintenance authority.
-- Events need indexer 4.4.0 or later (beta API); otherwise the payload and state can be supplied directly.
-- Draft events named `mip-xxxx` are not events of the numbered MIP. The reference deployment emits the draft name, and is redone once a number is assigned.
+### Existing contracts and consumers
+
+Contracts with no recognized event remain unchanged and produce `no
+publication`. Adoption requires a contract operation capable of emitting the
+event under that contract's maintenance model; it is not guaranteed to preserve
+keys or be available post-deployment. Consumers without the required event API
+can verify caller-supplied payload/state bytes, but cannot thereby establish
+network/address provenance or latest-event selection.
+
+Old consumers may accept bundles that a conforming v1 consumer rejects. New
+consumers do not change ledger behavior; they fail closed at their unsupported
+or invalid boundary.
+
+### Experimental migration and stricter validation
+
+Existing `mip-xxxx` events and bundles remain experimental evidence. A numbered
+event is a new publication, not an alias. Cached conclusions retain their old
+event/version identity and must not be relabelled.
+
+The prototype accepted invalid UTF-8 by replacement decoding, embedded NUL or a
+fragment in the URI, decoded duplicate members, lone surrogate escapes,
+integer-valued fraction/exponent sizes, and noncanonical module-marker bytes
+when committed. This Draft rejects them, so strict conformance is intentionally
+incompatible with those inputs. Conversely, v1 object-member and file-array
+order are explicitly irrelevant; a producer that depended on textual order did
+not define a semantic requirement.
 
 ## Security Considerations
 
-### Who can publish
+### Assets, adversaries and trust boundaries
 
-### What each level proves, and what it does not
+The protected properties are bundle integrity, correct key comparison, bounded
+claims about local results, host resources, and accurate disclosure. Relevant
+adversaries include a permissionless or compromised publisher, malicious host
+or wrapper, omitting/equivocating state provider, hostile compiler input, and a
+consumer configured with excessive authority. The compiler/runtime,
+event/state source, local confinement mechanism, and any publication
+authorization policy remain explicit trust dependencies.
 
-### Bundle code is untrusted (a separate process, not a sandbox)
+### False verification and stale observations
 
-### Hostile hosts and limits
+Genuine keys beside forged JS can pass Levels 1 and 2; Level 3 or explicit
+publisher trust addresses code provenance. Level 3 still does not prove unique
+source, compiler soundness, eligibility, or original ledger names. A newer
+invalid/unavailable event blocks silent fallback. Key changes, reorganizations,
+incomplete pagination, and separately queried event/state snapshots can make a
+report stale or conditional. Cache identities and report limitations make
+those risks visible but cannot repair an omitting provider.
 
-- Sizes, stalls and private addresses; a bundle stopped by a limit is reported as unchecked.
+Permissionless publication lets any successful caller supersede a previous
+bundle. Contracts needing owner endorsement must enforce their own
+authorization; this protocol deliberately does not infer it.
 
-### Trust in the state source
+### Compiler, runtime and transport attacks
 
-- The indexer; your own node; MIP-0009.
+Source imports, compiler processes, and generated JS may attempt filesystem,
+network, credential, process, memory, CPU, or output abuse. Confinement must be
+in place before access. A child process and a post-build trace are useful
+diagnostics but are not a sandbox. Redirects can bypass a destination policy
+unless every hop is checked. Resource refusal leaves content unchecked rather
+than proving it invalid.
 
-### Keys that change after verification
+### Commitment and information exposure
 
-- The maintenance authority can change keys at the same address.
-
-### What stays public
-
-### Commitment binding
-
-### Reader privacy
-
-- Fetching the bundle tells its host you are interested in the contract.
-
-### Level 3 trusts the installed compiler
-
-### Proving cost
-
-- A pointer to the measured cost in Appendix C, as MIP-0018 does.
+The commitment protects integrity under the stated assumptions, not
+availability, confidentiality, authorization, or freshness. Its additive
+composition remains an independent-review gate. Bundles and public state can
+reveal contract structure; fetches reveal reader interest; arguments, results,
+and diagnostics can be retained by local software. A local result carries no
+proof that another party can verify.
 
 ## Implementation
 
-### Components
+### Reference components and pinned artifacts
 
-- Reference implementation: https://github.com/acedward/compact-off-chain-circuits (Apache-2.0), pinned to a commit at submission.
-- The module, the template, the deployer check, the verifier, and the OpenZeppelin examples.
+The reference repository is
+[`acedward/public-interfaces-for-compact-contracts`](https://github.com/acedward/public-interfaces-for-compact-contracts)
+at baseline commit
+[`1879be566e0b6669ce00b73c3b69ef32641f9eb7`](https://github.com/acedward/public-interfaces-for-compact-contracts/commit/1879be566e0b6669ce00b73c3b69ef32641f9eb7).
+It contains the Compact publisher module/template, bundle assembler, verifier,
+executor, examples, tests, and historical Stagenet evidence. The tested bundle
+pins compiler 0.34.0, language 0.26.0, runtime 0.19.0, and `@noble/curves`
+2.4.0. Compiler evidence used image `aa-compactc:0.34.0` with image ID
+`sha256:8f97b90cee942d479bcc7d3f26b9c193be37c71ea5bbb3857c769b7dc6a7d9fa`.
 
-### Reference deployment (Stagenet)
+### Known conformance deviations
 
-- The facts are kept in the reference repository, not in this document.
+| Requirement | Prototype behavior | Follow-up needed |
+|---|---|---|
+| event/payload and URI resolution | replacement-decodes invalid UTF-8, accepts embedded NUL/fragments, does not require an absolute URI, does not implement the v1 directory-URI algorithm when consuming an event, and leaves `!'()*` unescaped in file path segments | strict byte/URI parser and resolver |
+| JSON and schema | native parsing accepts decoded duplicate members, lone surrogate escapes, and integer-valued exponent/fraction `size` forms; required artifacts and the exact module marker are not all schema-checked | strict RFC 8259 parser and bundle-profile validator |
+| package/toolchain profile | some version/flag relations are compared, but complete package pins, source entry, dependency pin, and trusted-input policy are not a conformance claim | full profile validation |
+| paths/materialization | lexical paths are checked, but filesystem alias/case equivalence is not detected on every platform | distinct-name capability check |
+| local filesystem transport | local reads can follow symbolic links before copying bytes | reject links/special files before access |
+| discovery/order/snapshot | events and state are queried separately and service IDs stand in for source order | completeness, order, common-snapshot, and conditional-report model |
+| installed/pure/witness coverage | keys and declared witnesses are checked, but the exact `pure`/`proof` classification and equality of metadata, shipped-key, `expectedVk`, and rebuilt-key name sets are not enforced | exact set checks, separate unkeyed report, and eligibility gate |
+| read effects/context | witnesses and keys are checked, but writes/events/asset/call effects and context access are not | complete analyzer or runtime monitor |
+| compilation confinement | import trace is examined after compilation | pre-access sandbox and resource bounds |
+| Level 3 artifact set | prototype compares keys, JS, and `contract-info.json`, but not the required typings; it also does not validate the profile-owned module marker as canonical bytes | compare the complete compiler artifact set and validate the marker at Level 1 |
+| execution confinement | child inherits user privileges | sandbox, credentials/network denial, and resource controls |
+| transport | declared/aggregate sizes are capped, but deadline and private/redirect destination policy are incomplete | per-hop policy and explicit outcomes |
+| fault classification | some generated failures can be classified as assertions | preserve input/assertion/unsupported/tool-fault distinctions |
 
-### Dependencies
+The reference implementation is therefore a prototype, not a conforming v1
+consumer. A prototype `L1`, `L2`, or `L3` message means only that its implemented
+checks passed; it does not imply every requirement of the corresponding level
+above was checked.
 
-- MIP-0002; compact 0.34.0, language 0.26.0, runtime 0.19.0; ledger v9; indexer 4.4.0 or later.
+### Stagenet deployment and observations
+
+The historical partial-source bundle has commitment
+`4814bf93c6c0a6c81c7839f9be72c80365c2a4179d58171e7acd40906be30891`
+and contract address
+`5d3233163cd730afb8a31b3e61e77fbd5949fa05d35920bd2b5cea32febaa0f6`.
+Its publication is recorded at block 608267, transaction
+`79fa53ab3601a373b778d3c0f6d457784457c5540276b254c85d55a7bc55b3de`.
+
+On 2026-09-25, a fresh query of the public Stagenet indexer selected service
+event 44409; Levels 1 and 2 passed against a local copy of the historical bundle
+for six operations, and `name()` returned `Off-Chain Reads Private Token`.
+This was not a new publication, did not fetch the bundle over HTTP, did not run
+Level 3 live, and did not authenticate a common indexer/RPC snapshot. A separate
+RPC query reported genesis
+`0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491`;
+that observation does not cryptographically bind the indexer response to it.
+
+A separate fresh integration on 2026-09-25 deployed contract
+`9a8743f6073dc6a8121db681e66e1668ffcaae00620fe87aa020bfbc2c7a1935` in
+block 618587 (transaction
+ID `0018bfd4308454668db3ec047086eb04a9ed4dcfce45f62c13e222a6e225507ea8`,
+hash `966ad3bdbaec61d98c83e5c5677133b9ac3bc798f36b11f2399429ba17cb16c4`).
+It then published the same immutable hosted 13-file bundle in block 618650,
+transaction ID
+`009757877d55e23fae6336038601acdedf350047ca11373679eab010f17891deea`,
+hash `515e00d36de8a757702bb5061f829e0a422266fdcddbeaccf134947154a3755d`.
+The index URI was
+`https://compact-off-chain-circuits.pages.dev/public-interface/erc20-private/index.json`.
+At `2026-09-25T16:14:37.269Z`, the indexer independently returned event 45503
+with the exact payload and no newer publication. Live retrieval used 14 HTTPS
+requests and transferred 79,162 bytes including the index.
+
+The prototype's implemented Level 1 passed; Level 2 matched all six read keys
+and its wrapper table; and Level 3 with Compact 0.34.0 reproduced those six
+keys, `index.js`, and `contract-info.json`. Prototype invocations returned
+`name = "Off-Chain Reads Private Token"`, `symbol = "OCRP"`, `decimals = 18`,
+`totalSupply = 1000000000000000000000000`, the same demo-holder balance, and
+zero allowance to the zero key. A short key failed input validation after
+Levels 1/2; a flipped event commitment failed Level 1 and executed no code.
+These labels report the prototype checks, not the stricter complete-artifact,
+eligibility, or confinement conformance defined by this Draft.
+
+An RPC observation mapped block 618650 to
+`0xb356415cfc6dcbbde10b6a3a4445920894e066252c4757c3b70041b4bdf7f396`
+and observed finalized height 618668. Event and state came from separate indexer
+queries, while network identity/finality came from a separate RPC provider;
+the run therefore does not prove provider completeness or a cryptographically
+authenticated common snapshot.
 
 ## Testing
 
-- Conformance vectors: the generator, fixed commitments, the event name's bytes, the index rules.
-- Per-level fixtures: tampered files, swapped or missing keys, another contract's state, imports that escape the bundle.
-- Key identity for open and private interfaces; a live Level 3 run on Stagenet.
+### Normative vectors and interoperability
+
+Conformance evidence should apply Appendix B independently of the reference
+implementation. Sharing its hash/parser library is regression evidence, not an
+independent implementation. Implemented status requires a separately produced
+codec or model to reproduce valid vectors and reject invalid ones.
+
+### Positive, negative and adversarial cases
+
+The conformance corpus must cover every level; URI/JSON/path boundaries;
+missing, extra, and changed keys; a genuine key beside forged JS; import escape;
+effects restored before return; event-only effects; unsupported context;
+publication ordering, omission, reorganization, and key upgrades; and transport
+and resource refusal.
+
+Runtime 0.19 probes recorded ledger writes in the public transcript even when a
+second write restored the final state, confirming why final-state equality is
+insufficient. The same low-level trace did not provide a sound semantic marker
+that distinguished `kernel.self()` context access from ordinary reads. A
+runtime-0.19 monitor without additional sound analysis must therefore report
+such eligibility unestablished rather than infer safety from transcript shape.
+
+A pure helper inside a valid installed operation may pass as part of that
+operation, while a pure exported circuit must not be called a verified installed
+operation. A field-renamed interface may reproduce keys, but its labels must not
+be called authenticated original names. Compiler probes are evidence for the
+tested version only: changing return constants or selected ledger/opaque slots
+changed keys, while changing an assertion message retained a key.
+
+In a Compact 0.34.0 probe, `contract-info.json` listed keyed `readValue` as
+`pure: false, proof: true` and unkeyed `helper` as
+`pure: true, proof: false`; the key directory and `expectedVk` table contained
+only `readValue`. Requesting `helper` was refused after bundle verification
+because no key passed Level 2. Separate sources differing only in ledger label `alpha` versus `beta`
+produced byte-identical `readValue.verifier` files (SHA-256
+`ea0442871fd83cda0b6eb00de3f81de8b99c8f39fd9341ac7fe15d7169142418`)
+while their source and compiler-metadata digests differed. These are bounded
+observations for that compiler, not general source-equivalence proofs.
+
+The prerequisite-complete compiler build produced 78 circuits across seven
+targets and all 19 published interface keys matched their full-contract keys.
+One full Vitest run listed all 346 assertions as passing but exited nonzero after
+an unhandled worker-RPC timeout following the isolation test; it is not counted
+as a clean suite pass. A bounded rerun excluding only that already-executed file
+exited zero with 338 passed and three git-dependent layout checks skipped. The
+timeout and skips remain part of the evidence rather than being relabelled as
+passes.
+
+### Stagenet integration and result reporting
+
+A fresh integration record requires distinct deployment/publication transaction
+identities, applied event bytes/order, immutable artifact digest/URI, state and
+network identities, Levels 1–3, known-value reads, and safe negative cases.
+Submitted but unobserved transactions, wallet readiness, old-deployment reads,
+skips, and infrastructure failures must be reported separately and do not count
+as a fresh publication pass.
+
+### Size and cost methodology
+
+Appendix C reports only reproducible artifact sizes. Future timing/proving claims
+must pin workload and artifact digests, hardware/container, software versions,
+network conditions, warm-up, repetitions, statistic, variance, and baseline.
+Bundle/download/rebuild work, local execution, and on-chain publication proving
+must be measured separately.
 
 ## References
 
-- MIP-0001, MIP-0002, MIP-0009, MIP-0018.
-- MPS-0005, MPS-0022, MPS-0036, MPS-0039.
-- The Zcash protocol specification (Sapling group hash, JubJub); RFC 7693 (BLAKE2); RFC 2119.
-- OpenZeppelin Compact Contracts.
-- The Ethereum ABI and Sourcify, as analogues.
+Normative:
+
+- [MIP-0002, Public Contract Log Emission, pinned revision](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/a3e664aadf1b76124354aba4f56ec01651a95291/mips/mip-0002-public-contract-log-emission.md) — event model and service-order boundary.
+- [Zcash Protocol Specification v2026.7.0 source, commit `9ac2e20`](https://github.com/zcash/zips/blob/9ac2e20d298256250c4decb891e85aaa02fccc4c/protocol/protocol.tex) — Jubjub representation and Sapling GroupHash; referenced source SHA-256 `c1e033672ff90d01857038333f2fec57219ae9bed96154c12267a968b57ee4ac`.
+- [FIPS 180-4](https://doi.org/10.6028/NIST.FIPS.180-4) — SHA-256.
+- [RFC 7693](https://www.rfc-editor.org/rfc/rfc7693) — BLAKE2s.
+- [RFC 3629](https://www.rfc-editor.org/rfc/rfc3629) — UTF-8.
+- [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986) — absolute URI syntax.
+- [RFC 8259](https://www.rfc-editor.org/rfc/rfc8259) — JSON syntax and Unicode model.
+- [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174) — requirement-word convention.
+
+Informative:
+
+- [MIP process and template, pinned revision](https://github.com/midnightntwrk/midnight-improvement-proposals/tree/a3e664aadf1b76124354aba4f56ec01651a95291) — document lifecycle and format.
+- [Compact compiler 0.34.0 source](https://github.com/LFDT-Minokawa/compact/tree/1f671fc27818df2b2676b3a97f85b2b821756243) — tested compiler implementation.
+- [Midnight documentation, pinned revision](https://github.com/midnightntwrk/midnight-docs/tree/c628ffa243e140fee05b945d94ba79976654e5f6) — Compact and disclosure background.
+- [MPS-0022](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/a3e664aadf1b76124354aba4f56ec01651a95291/mps/mps-0022-standard-contract-representation.md), [MPS-0036](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/a3e664aadf1b76124354aba4f56ec01651a95291/mps/mps-0036-security-evidence-for-compact.md), and [MPS-0039](https://github.com/midnightntwrk/midnight-improvement-proposals/blob/a3e664aadf1b76124354aba4f56ec01651a95291/mps/mps-0039-lightweight-contract-interaction.md) — Proposed motivating problem statements at the pinned revision, not protocol dependencies.
 
 ## Acknowledgements
 
+No additional contributors are recorded in this Draft.
+
 ## Copyright Waiver
 
-All contributions (code and text) submitted in this MIP must be licensed under the Apache License, Version 2.0.
-Submission requires agreement to the Midnight Foundation Contributor License Agreement, which includes the assignment of copyright for your contributions to the Foundation.
+Code and text submitted with this MIP are licensed under Apache-2.0. The current
+MIP template refers to a Contributor License Agreement but does not identify an
+operative link; authors must confirm that process with the MIP editors rather
+than infer assent from this Draft.
 
----
+## Appendix A: Example bundle (informative)
 
-## Appendix A: An example bundle (informative)
+The historical partial-source bundle has this layout:
 
-## Appendix B: Commitment test vectors
+```
+README.md
+index.json
+package.json
+src/Interface.compact
+out/compiler/contract-info.json
+out/contract/index.js
+out/contract/index.d.ts
+out/contract/package.json
+out/keys/{allowance,balanceOf,decimals,name,symbol,totalSupply}.verifier
+```
 
-## Appendix C: Circuit cost (informative)
+Its complete index is:
 
-- The circuit rows of `publishBundle`, measured as MIP-0018 measures its shapes: compiled with Compact 0.34.0 and measured with its bundled `zkir-v3 mock-compile`.
+```json
+{
+  "bundle": "v1",
+  "commitment": "ecmh-jubjub-grouphash",
+  "hash": "4814bf93c6c0a6c81c7839f9be72c80365c2a4179d58171e7acd40906be30891",
+  "compiler": { "name": "compactc", "version": "0.34.0" },
+  "files": [
+    { "path": "README.md", "sha256": "59e955c892ee3bb080f35ff0339a2309dd1c2bbbf4906ae1f388e63be70bb6af", "size": 3034 },
+    { "path": "out/compiler/contract-info.json", "sha256": "5ea5b2badf33520c11659b06318342d8a7844a50ee3762cd8bd88a616a354ae8", "size": 8319 },
+    { "path": "out/contract/index.d.ts", "sha256": "166f80acd0809731ad55f44441d97b6a80bce905ab93770aee874d76d645eb77", "size": 3638 },
+    { "path": "out/contract/index.js", "sha256": "d0de30821770d6401f4f7def2705e4da94386e8effbd8db07834e9e45a4b5c72", "size": 49810 },
+    { "path": "out/contract/package.json", "sha256": "5a065fe7d8eab2a582f428e11c2ea63aaf70607a54f69cfd5c711b5c53d91b32", "size": 21 },
+    { "path": "out/keys/allowance.verifier", "sha256": "a5b0ed5dbf6e864fe9c7f27a90fb9f94cff5614251290bdae43f7dda2f01a431", "size": 1351 },
+    { "path": "out/keys/balanceOf.verifier", "sha256": "70732de7157e8283a8feeb7dd4005ddee4db1ad88d4e2678b6a7e94c6d652fd2", "size": 1351 },
+    { "path": "out/keys/decimals.verifier", "sha256": "d953d2e9fe8b772d22a0052290c91f24ff26d80c83702e750d8e48bef434ea74", "size": 1351 },
+    { "path": "out/keys/name.verifier", "sha256": "3ae424029ce913f69934ef92705e2945b968c375d205355cc40a3ebce42dd84d", "size": 1351 },
+    { "path": "out/keys/symbol.verifier", "sha256": "52186c9f4c4189ff4726579cd9e64fa03eae2f4b26c177232551f5819eefbe28", "size": 1351 },
+    { "path": "out/keys/totalSupply.verifier", "sha256": "ec9d7a336be98dc94c231866feb4d5b54647beaee020393ba1e3774c01aaacb3", "size": 1351 },
+    { "path": "package.json", "sha256": "acda3f4dc2b94b32d9279131d3b8ae9728103b8c390034844c642cc3f419a024", "size": 322 },
+    { "path": "src/Interface.compact", "sha256": "75d409ef092645dfc408a5a16d6dc7816f056a7ab0b05878214e88557c32d78a", "size": 3649 }
+  ]
+}
+```
 
-## Appendix D: Sizing guidance (informative)
+The publisher commits the index entries and emits the commitment plus index
+URI. A consumer selects that event, verifies Levels 1–3 as requested, separately
+establishes eligibility and confinement, and reports the typed result with its
+state/event/tool identities.
 
-## Appendix E: Mapping to MPS-0039's goals (informative)
+## Appendix B: Encoding and commitment vectors (normative)
+
+### Event and payload vectors
+
+The event name is:
+
+```
+6d69702d787878783a7075626c69632d696e746572666163655b76315d000000
+```
+
+For commitment
+`05b4ba14c6002f9df93c6267467e53c43b3320338b08ccae389a67add3a9f032`
+and URI `https://a.example/b/index.json` (30 bytes), the complete 256-byte
+payload is:
+
+```
+05b4ba14c6002f9df93c6267467e53c43b3320338b08ccae389a67add3a9f03268747470733a2f2f612e6578616d706c652f622f696e6465782e6a736f6e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+```
+
+It contains 194 zero padding bytes. The ASCII URI
+`https://a.example/` followed by 206 `x` bytes is 224 bytes and uses no padding;
+one more `x` rejects. Invalid UTF-8, raw non-ASCII/IRI text, an embedded `00`,
+empty URI, relative URI, or nonzero data after the first padding byte rejects.
+
+URI resolution has these literal outcomes:
+
+| Publication URI / input | Result |
+|---|---|
+| `https://example.test/bundle/` | index `https://example.test/bundle/index.json` |
+| `https://example.test/bundle/?token=x` | index `https://example.test/bundle/index.json`; base query discarded |
+| `https://example.test/bundle/index.json?token=x` | that exact URI is fetched as the index |
+| preceding direct index plus bundle path `a%2Fb?c` | file `https://example.test/bundle/a%252Fb%3Fc`; index query discarded |
+| direct index plus bundle path `a!b` | file path ends `a%21b`; only unreserved bytes remain literal |
+| `https://example.test/bundle/#part` | invalid publication; fragments are forbidden |
+
+### Index and path vectors
+
+These are schema/path outcomes with all unmentioned fields otherwise valid.
+Acceptance here does not by itself make a complete bundle conformant; the
+bundle still needs the required artifacts and a nonempty installed-operation
+key set.
+
+| Input change | Result |
+|---|---|
+| reorder JSON members or `files` entries | accept; commitment unchanged |
+| prefix an otherwise valid index with UTF-8 BOM bytes `efbbbf` | reject |
+| include both member names `"bundle"` and `"\u0062undle"` | reject as a decoded duplicate |
+| root-package ordinary metadata string `"\uD83D\uDE00"` | accept at the JSON layer as one scalar value |
+| replace that value with lone `"\uD800"` | reject at the JSON layer |
+| duplicate any other decoded JSON member or path | reject |
+| add an unknown v1 member | reject |
+| size `0` or `9007199254740991` | accept if actual size matches |
+| size `-1`, `-0`, `1.0`, `1e0`, or `9007199254740992` | reject |
+| module marker exact hex `7b202274797065223a20226d6f64756c6522207d0a` | accept; alternate whitespace or newline bytes reject |
+| `out/index.json` | accept |
+| `index.json`, `/a`, `a\\b`, `a//b`, `a/../b`, `node_modules/x`, or `a b` | reject |
+| list both `a` and `a/b` | reject |
+
+### Metadata and key-set vectors
+
+For Compact 0.34.0 metadata rows
+`readValue = { pure: false, proof: true }` and
+`helper = { pure: true, proof: false }`, the keyed set is
+`K = {readValue}` and the reported unkeyed set is `U = {helper}`. With shipped,
+wrapper-table, and rebuilt name sets `S = E = R = {readValue}`, a same-named
+state key, and `expectedVk.readValue` equal to
+`ea0442871fd83cda0b6eb00de3f81de8b99c8f39fd9341ac7fe15d7169142418`,
+Levels 2 and 3 accept the key relation; `helper` remains unkeyed/unverified.
+
+Adding `helper` to `S`, `E`, or `R`; omitting `readValue` from any of those
+sets; duplicating either metadata name or table row; changing that digest; or
+removing/changing the same-named state key rejects at the applicable level.
+
+### Group-hash and bundle commitment vectors
+
+The Sapling generator check is:
+
+```
+FindGroupHash(empty, ASCII("Zcash_G_"))
+= 30b5f2aaad325630bcdddbce4d67656d05fd1cc2d037bb5375b6e96d9e01a1d7
+```
+
+The successful counter is `2`.
+
+The empty mathematical sum encodes as `01` followed by 31 zero bytes. It is an
+arithmetic vector, not a conforming empty interface bundle.
+
+For file contents `a` and `b`:
+
+```
+SHA256("a") = ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
+SHA256("b") = 3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d
+
+P("a.txt", SHA256("a")) = 121384346975cb046459197d60aff974ccd207da9364c67650e5ec7db7003401
+P("b.txt", SHA256("b")) = d464da7045b218972a8c990470cf4c5db11d0a5c4fdf48398fd76fe4dda691ef
+
+C({a.txt, b.txt}) = 05b4ba14c6002f9df93c6267467e53c43b3320338b08ccae389a67add3a9f032
+```
+
+The entry counters are `2` for `a.txt` and `1` for `b.txt`. The following exact
+mutations have these outputs:
+
+| Entry multiset | Expected commitment |
+|---|---|
+| same two entries in order `b.txt`, `a.txt` | `05b4ba14c6002f9df93c6267467e53c43b3320338b08ccae389a67add3a9f032` |
+| rename `a.txt` to `c.txt`, retaining content `a` | `589aa173cdc4e9970b7cfe860287bcecf73aa1fc59ca7a62bbb794eb11e392b0` |
+| replace content `a` with uppercase `A` at `a.txt` | `c28a364e801e4b424840418a4ffb24161392da67c4363ccee2b14c248586a3e5` |
+| add `c.txt` with content `c` | `3e8b1f09a5f60f3db8ae0d70bec353ef9af4f41085401812667d55aad59d24a0` |
+| drop `b.txt` | `121384346975cb046459197d60aff974ccd207da9364c67650e5ec7db7003401` |
+| arithmetic-only repetition of the `a.txt` entry | `8d0ec3139f1a25374a1b751234f4cb6d9da4668133113172b8cc275da1ab9f22` |
+
+The repeated-entry row tests the multiset arithmetic only; the corresponding
+index is invalid because duplicate paths reject before commitment acceptance.
+
+## Appendix C: Measured size and cost (informative)
+
+The historical bundle in Appendix A contains 13 committed files. Its generated
+wrapper is 49,810 bytes and each of its six verifier keys is 1,351 bytes. These
+are exact artifact sizes for that bundle, not protocol limits or per-circuit
+forecasts. Its index is excluded from the commitment. The event payload is
+always 256 bytes.
+
+No reproducible proof-generation, transaction-fee, fetch-latency, execution-
+latency, or scale benchmark is claimed by this Draft. Those measurements remain
+stage-gate evidence under the methodology in Testing.

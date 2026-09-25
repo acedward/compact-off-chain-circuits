@@ -3,6 +3,7 @@ build/
 bundle/
 sim/
 tmp/
+/out/
 .DS_Store
 .env
 .env.*

@@ -15,7 +15,7 @@ import * as verifyModule from '../src/verify.mjs';
 import { levelThree, verify } from '../src/verify.mjs';
 import {
   BUILD_HINT, COMPACT, COMPACT_HINT, DEMO_URL, LIVE_TOKEN, REPO, advertise, compile, genuineFungible, hasCompact,
-  integrationOnlyTree, interfaceSrc, isBuilt,
+  openZeppelinTree, interfaceSrc, isBuilt,
 } from './helpers.mjs';
 
 const exitStatus = (...a) => verifyModule.exitStatus(...a);
@@ -27,7 +27,7 @@ describe.skipIf(!isBuilt())(`a read runs only a circuit whose key passed Level 2
 
   /** An interface bundle compiled from an edited copy of the fungible interface source. */
   const editedBundle = (name, editSource) => {
-    const c = integrationOnlyTree(join(f.dir, `tree-${name}`));
+    const c = openZeppelinTree(join(f.dir, `tree-${name}`));
     const src = join(c, `${name}.Interface.compact`);
     writeFileSync(src, editSource(readFileSync(interfaceSrc('fungible'), 'utf8')));
     const out = compile(src, join(f.dir, `out-${name}`));

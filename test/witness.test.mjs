@@ -12,7 +12,7 @@ import { assembleBundle } from '../src/bundle.mjs';
 import { RefusedError, deployCheck } from '../src/deployer.mjs';
 import { executeCircuit } from '../src/execute.mjs';
 import { simulate } from '../scripts/simulate-deploy.mjs';
-import { BUILD_HINT, COMPACT_HINT, compile, fullOut, hasCompact, integrationOnlyTree, isBuilt, scratch } from './helpers.mjs';
+import { BUILD_HINT, COMPACT_HINT, compile, fullOut, hasCompact, openZeppelinTree, isBuilt, scratch } from './helpers.mjs';
 
 const URL = 'https://example.invalid/nft/';
 
@@ -21,7 +21,7 @@ describe.skipIf(!hasCompact() || !isBuilt())(`circuits with witnesses are refuse
 
   beforeAll(() => {
     s = scratch('witness');
-    const c = integrationOnlyTree(join(s.dir, 'tree'));
+    const c = openZeppelinTree(join(s.dir, 'tree'));
     src = join(c, 'Transferable.Interface.compact');
     writeFileSync(src, [
       'pragma language_version >= 0.23.0;',

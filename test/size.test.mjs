@@ -19,7 +19,7 @@ import { assembleBundle } from '../src/bundle.mjs';
 import { deployCheck } from '../src/deployer.mjs';
 import { walk } from '../src/hash.mjs';
 import { simulate } from '../scripts/simulate-deploy.mjs';
-import { BUILD_HINT, COMPACT_HINT, EXAMPLES, compile, fullOut, hasCompact, integrationOnlyTree, interfaceOut, interfaceSrc, isBuilt, scratch } from './helpers.mjs';
+import { BUILD_HINT, COMPACT_HINT, EXAMPLES, compile, fullOut, hasCompact, openZeppelinTree, interfaceOut, interfaceSrc, isBuilt, scratch } from './helpers.mjs';
 import { writeFileSync } from 'node:fs';
 
 const KB = 1024;
@@ -72,7 +72,7 @@ describe.skipIf(!isBuilt())(`footprint (${isBuilt() ? 'built' : BUILD_HINT})`, (
   });
 
   it.skipIf(!hasCompact())(`a bundle exposing one circuit keeps its compiled artifacts under 64 KB (${hasCompact() ? 'ok' : COMPACT_HINT})`, () => {
-    const c = integrationOnlyTree(join(s.dir, 'one'));
+    const c = openZeppelinTree(join(s.dir, 'one'));
     const src = join(c, 'One.Interface.compact');
     writeFileSync(src, [
       'pragma language_version >= 0.23.0;',

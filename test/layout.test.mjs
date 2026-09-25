@@ -21,7 +21,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RefusedError, deployCheck } from '../src/deployer.mjs';
-import { BUILD_HINT, COMPACT_HINT, compile, fullOut, hasCompact, integrationOnlyTree, isBuilt, scratch } from './helpers.mjs';
+import { BUILD_HINT, COMPACT_HINT, compile, fullOut, hasCompact, openZeppelinTree, isBuilt, scratch } from './helpers.mjs';
 
 const IFACE = (prefix, param) => [
   'pragma language_version >= 0.23.0;',
@@ -41,9 +41,9 @@ describe.skipIf(!hasCompact() || !isBuilt())(`what changes a verifier key (${has
   beforeAll(() => { s = scratch('layout'); });
   afterAll(() => s?.cleanup());
 
-  /** A private copy of the integration tree, optionally with the module edited. */
+  /** A private copy of the OpenZeppelin tree, optionally with the vendored module edited. */
   const tree = (name, editModule) => {
-    const c = integrationOnlyTree(join(s.dir, name));
+    const c = openZeppelinTree(join(s.dir, name));
     const modPath = join(c, 'vendor', 'token', 'NonFungibleToken.compact');
     if (editModule) writeFileSync(modPath, editModule(readFileSync(modPath, 'utf8')));
     return c;

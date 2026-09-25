@@ -82,7 +82,7 @@ export function scratch(label) {
  * and their interfaces). No deployable contract, no test, no tool. Returns the
  * copy's `openzeppelin` directory, where an interface next to the wrappers goes.
  */
-export function integrationOnlyTree(dir) {
+export function openZeppelinTree(dir) {
   mkdirSync(join(dir, 'compact'), { recursive: true });
   cpSync(join(REPO, 'compact', 'OffChainInterface.compact'), join(dir, 'compact', 'OffChainInterface.compact'));
   const oz = join(dir, 'compact-examples', 'openzeppelin');

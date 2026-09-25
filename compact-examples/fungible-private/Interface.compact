@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // compact-off-chain-circuits — a private interface for the ERC-20 example,
-// `compact/examples/fungible/Full.compact`.
+// `compact-examples/fungible/Full.compact`.
 //
 // The six read bodies are adapted from OpenZeppelin Compact Contracts
 // v0.3.0-alpha.1 @ 746724f8 (token/FungibleToken.compact, utils/Utils.compact),

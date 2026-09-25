@@ -9,7 +9,7 @@ import { cpSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'nod
 import { join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { walk } from '../src/hash.mjs';
-import { BUILD_HINT, COMPACT_HINT, REPO, compile, hasCompact, integrationOnlyTree, interfaceOut, isBuilt, scratch } from './helpers.mjs';
+import { BUILD_HINT, COMPACT_HINT, REPO, compile, hasCompact, openZeppelinTree, interfaceOut, isBuilt, scratch } from './helpers.mjs';
 
 const MODULES = { fungible: 'FungibleTokenReadable', nft: 'NonFungibleTokenReadable', multi: 'MultiTokenReadable' };
 
@@ -19,7 +19,7 @@ describe.skipIf(!hasCompact())(`isolation (${hasCompact() ? 'compiler present' :
   afterAll(() => s?.cleanup());
 
   it('the standard\'s module is self-contained and exposes exactly one circuit', () => {
-    const dir = join(s.dir, 'pattern');
+    const dir = join(s.dir, 'module-only');
     mkdirSync(dir, { recursive: true });
     cpSync(join(REPO, 'compact', 'OffChainInterface.compact'), join(dir, 'OffChainInterface.compact'));
     writeFileSync(join(dir, 'Unrelated.compact'), [
@@ -45,7 +45,7 @@ describe.skipIf(!hasCompact())(`isolation (${hasCompact() ? 'compiler present' :
 
   describe('the OpenZeppelin interfaces compile with only the vendored modules, the wrappers and the standard\'s module present', () => {
     let root, tree;
-    beforeAll(() => { root = join(s.dir, 'integrations'); tree = integrationOnlyTree(root); });
+    beforeAll(() => { root = join(s.dir, 'openzeppelin-only'); tree = openZeppelinTree(root); });
 
     it('the tree contains no deployable contract, test or tool', () => {
       const files = walk(root).map((f) => relative('.', f));

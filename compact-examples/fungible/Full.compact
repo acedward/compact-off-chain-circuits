@@ -6,13 +6,13 @@
 // exposes internal circuits and bypasses safety checks. DO NOT deploy it.
 //
 // Changes from upstream (2):
-//   1. the import path points at the readable integration module instead of
+//   1. the import path points at the Readable module instead of
 //      the upstream module, so this contract gains `publishBundle`;
 //   2. `publishBundle` is re-exported, like every other circuit the mock
 //      re-exports.
 //
 // This is the DEPLOYED contract in this repository's tests. Its counterpart is
-// `compact/integrations/openzeppelin/FungibleTokenReadable.Interface.compact`,
+// `compact-examples/openzeppelin/FungibleTokenReadable.Interface.compact`,
 // which imports the same module and therefore produces byte-identical verifier
 // keys for the circuits it exposes.
 

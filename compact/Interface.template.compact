@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// compact-off-chain-circuits — Interface template.
+// MIP-xxxx: Public Interfaces for Compact Contracts — the interface template.
 //
 // Copy this file next to your contract, rename it <YourContract>.Interface.compact,
 // and fill in the two places marked TODO. It does NOT compile until you do: the
@@ -27,7 +27,7 @@
 //     publishes that module's whole source, every circuit body in it included.
 //   * The private way: import no module and declare the ledger here, repeating
 //     EVERY declaration in the deployed order with the deployed types. You may
-//     rename them; `compact/examples/fungible-private/Interface.compact` names
+//     rename them; `compact-examples/fungible-private/Interface.compact` names
 //     them hidden1, hidden2 and so on. Then copy each published circuit's code
 //     into this file, with the helpers it calls, and keep its statements in the
 //     original order: the key follows the order of the statements, not only
@@ -71,9 +71,9 @@ import CompactStandardLibrary;
 
 // TODO(1): import the SAME module your deployed contract imports, by a path
 // relative to this file. For a contract built on this repository's OpenZeppelin
-// integrations that is, for example:
+// examples that is, from compact/, for example:
 //
-//     import "../integrations/openzeppelin/FungibleTokenReadable" prefix FungibleTokenReadable_;
+//     import "../compact-examples/openzeppelin/FungibleTokenReadable" prefix FungibleTokenReadable_;
 //
 // For the private way, delete this import and declare the ledger here instead
 // (INVARIANT 1).
@@ -101,4 +101,4 @@ export circuit exampleRead(id: Uint<128>): Opaque<"string"> {
 //   call publishBundle(<printed payload>) once, from any account that can call
 //     your contract
 //
-// See docs/INTEGRATION.md for the full procedure.
+// The README's "Contract owners" section has the full procedure.

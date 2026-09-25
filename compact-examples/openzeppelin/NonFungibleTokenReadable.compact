@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// compact-off-chain-circuits — OpenZeppelin NonFungibleToken integration.
+// OpenZeppelin NonFungibleToken, made readable: an example of MIP-xxxx: Public Interfaces
+// for Compact Contracts.
 //
-// Composition, not a fork: the upstream module under `compact/vendor/openzeppelin/`
-// is imported verbatim and every one of its exported circuits is re-exported here
-// unchanged, so upstream updates stay drop-in. The only addition is
-// `publishBundle`, from the pattern module `compact/OffChainInterface.compact`.
+// Composition, not a fork: the upstream module under `vendor/` is imported
+// verbatim and every one of its exported circuits is re-exported here unchanged,
+// so upstream updates stay drop-in. The only addition is `publishBundle`, from
+// the standard's module `compact/OffChainInterface.compact`.
 //
 // A contract that imports THIS module instead of the upstream one gains the
 // ability to commit to an off-chain interface bundle, and keeps the upstream
